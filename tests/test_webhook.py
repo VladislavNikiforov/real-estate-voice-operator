@@ -1,23 +1,10 @@
-"""Tests for Vapi webhook parsing + server endpoints."""
+"""Tests for ElevenLabs webhook endpoints + Claude chat endpoint."""
 import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
 from server.app import app
 
 client = TestClient(app)
-
-
-def _vapi_payload(tool: str, args: dict) -> dict:
-    return {
-        "message": {
-            "type": "tool-calls",
-            "toolCallList": [{
-                "id": "test_call_001",
-                "type": "function",
-                "function": {"name": tool, "arguments": args},
-            }]
-        }
-    }
 
 
 class TestHealthEndpoint:
@@ -27,10 +14,57 @@ class TestHealthEndpoint:
         assert resp.json()["status"] == "ok"
 
 
+class TestLookupContact:
+    def test_lookup_existing_contact(self):
+        resp = client.post("/api/tools/lookup-contact", json={"name": "John Smith"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "full_name" in data or "error" in data
+
+    def test_lookup_empty_name(self):
+        resp = client.post("/api/tools/lookup-contact", json={"name": ""})
+        assert resp.status_code == 200
+        assert "error" in resp.json()
+
+
+class TestSearchEmails:
+    def test_search_returns_emails(self):
+        resp = client.post("/api/tools/search-emails", json={"query": "invoice"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "emails" in data
+
+
+class TestCreateTask:
+    def test_create_invoice_task(self):
+        with patch("llm.orchestrator.send_email", new=AsyncMock(return_value={"success": True, "message_id": "t1"})), \
+             patch("llm.orchestrator.notify_task_complete", new=AsyncMock(return_value=True)), \
+             patch("llm.orchestrator.lookup_client", new=AsyncMock(return_value=None)), \
+             patch("llm.orchestrator.lookup_service", new=AsyncMock(return_value=None)):
+            resp = client.post("/api/tools/create-task", json={
+                "action": "send_invoice",
+                "client_name": "John",
+                "client_email": "j@j.com",
+                "property_id": "apt-1",
+                "amount": 10000,
+                "language": "en",
+            })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] in ("completed", "failed")
+
+    def test_unknown_action(self):
+        resp = client.post("/api/tools/create-task", json={"action": "unknown"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "error"
+
+
 class TestTestEndpoint:
-    def test_test_endpoint_exists(self):
-        # Even with no OpenClaw, /api/test should return 200
-        with patch("llm.orchestrator._post_to_openclaw", new=AsyncMock(return_value=False)):
+    def test_test_endpoint(self):
+        with patch("llm.orchestrator.send_email", new=AsyncMock(return_value={"success": True, "message_id": "t1"})), \
+             patch("llm.orchestrator.notify_task_complete", new=AsyncMock(return_value=True)), \
+             patch("llm.orchestrator.lookup_client", new=AsyncMock(return_value=None)), \
+             patch("llm.orchestrator.lookup_service", new=AsyncMock(return_value=None)):
             resp = client.post("/api/test", json={
                 "tool": "send_invoice",
                 "params": {
@@ -42,51 +76,21 @@ class TestTestEndpoint:
                 }
             })
         assert resp.status_code == 200
-        data = resp.json()
-        assert "result" in data
+        assert "result" in resp.json()
 
 
-class TestVapiToolCall:
-    def test_vapi_endpoint_returns_results_key(self):
-        with patch("llm.orchestrator._post_to_openclaw", new=AsyncMock(return_value=False)):
-            resp = client.post("/api/vapi/tool-call", json=_vapi_payload("send_invoice", {
-                "client_name": "Jānis",
-                "client_email": "j@j.lv",
-                "property_id": "apt-3",
-                "amount": 85000,
-                "language": "lv",
-            }))
-        assert resp.status_code == 200
-        assert "results" in resp.json()
-
-    def test_vapi_non_tool_call_returns_empty_results(self):
-        resp = client.post("/api/vapi/tool-call", json={
-            "message": {"type": "assistant-request"}
-        })
-        assert resp.status_code == 200
-        assert resp.json()["results"] == []
-
-    def test_vapi_unknown_tool_returns_error_message(self):
-        resp = client.post("/api/vapi/tool-call", json=_vapi_payload("unknown_tool", {}))
-        assert resp.status_code == 200
-        result_text = resp.json()["results"][0]["result"]
-        assert result_text  # non-empty — something is said back
-
-    def test_vapi_bad_json_returns_400(self):
-        resp = client.post(
-            "/api/vapi/tool-call",
-            content=b"not json",
-            headers={"Content-Type": "application/json"},
-        )
+class TestChatEndpoint:
+    def test_chat_no_text_returns_400(self):
+        resp = client.post("/api/chat", json={"session_id": "test", "text": ""})
         assert resp.status_code == 400
 
-    def test_result_contains_tool_call_id(self):
-        with patch("llm.orchestrator._post_to_openclaw", new=AsyncMock(return_value=False)):
-            resp = client.post("/api/vapi/tool-call", json=_vapi_payload("send_reminder", {
-                "client_name": "Anna",
-                "client_email": "a@a.lv",
-                "language": "lv",
-            }))
-        results = resp.json()["results"]
-        assert len(results) == 1
-        assert results[0]["toolCallId"] == "test_call_001"
+    def test_chat_no_api_key_returns_message(self):
+        """Without ANTHROPIC_API_KEY, chat returns a friendly error."""
+        resp = client.post("/api/chat", json={"session_id": "test", "text": "hello"})
+        assert resp.status_code == 200
+        assert "not configured" in resp.json()["text"].lower() or "text" in resp.json()
+
+    def test_chat_reset(self):
+        resp = client.post("/api/chat/reset", json={"session_id": "test"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"

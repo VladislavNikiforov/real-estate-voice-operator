@@ -4,7 +4,6 @@ import os
 import pytest
 
 # Set env vars before any import touches config
-os.environ.setdefault("OPENCLAW_URL", "http://localhost:8888")
 os.environ.setdefault("COMPANY_NAME",    "Test SIA")
 os.environ.setdefault("COMPANY_ADDRESS", "Test St 1, Riga")
 os.environ.setdefault("COMPANY_BANK",    "Swedbank")

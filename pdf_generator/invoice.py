@@ -6,7 +6,7 @@ from pathlib import Path
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.platypus import (
     SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, HRFlowable
@@ -16,18 +16,17 @@ from reportlab.pdfbase.ttfonts import TTFont
 
 from llm.models import InvoiceData
 from pdf_generator.templates import (
-    format_amount, format_date,
-    invoice_label, date_label, invoice_no_label, bill_to_label,
+    format_amount, invoice_label, date_label, invoice_no_label,
     description_label, amount_label, total_label, payment_details_label,
-    transaction_description,
+    transaction_description, seller_label, buyer_label,
+    reg_nr_label, vat_nr_label, qty_label, unit_price_label,
+    subtotal_label, vat_label, payment_terms_label,
 )
 
 # ── Font registration ─────────────────────────────────────────
-# DejaVu Sans covers Latvian extended Latin + Cyrillic.
-# Falls back to Helvetica (ASCII-only) if font file not found.
 
 _FONT_REGISTERED = False
-_UNICODE_FONT = "Helvetica"  # overwritten below if DejaVu found
+_UNICODE_FONT = "Helvetica"
 
 def _register_fonts() -> None:
     global _FONT_REGISTERED, _UNICODE_FONT
@@ -46,7 +45,11 @@ def _register_fonts() -> None:
         if p.exists():
             try:
                 pdfmetrics.registerFont(TTFont("DejaVuSans", str(p)))
-                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(p)))  # same file, bold via weight
+                bold_path = p.parent / "DejaVuSans-Bold.ttf"
+                if bold_path.exists():
+                    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(bold_path)))
+                else:
+                    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(p)))
                 _UNICODE_FONT = "DejaVuSans"
                 break
             except Exception:
@@ -63,11 +66,7 @@ _GRAY  = colors.HexColor("#6c757d")
 
 
 def generate_invoice_pdf(data: InvoiceData) -> bytes:
-    """Generate a PDF invoice and return raw bytes.
-
-    Supports Latvian and Russian characters if DejaVu Sans is installed.
-    Falls back to Helvetica (ASCII) gracefully.
-    """
+    """Generate a PDF invoice and return raw bytes."""
     _register_fonts()
     buf = io.BytesIO()
 
@@ -80,8 +79,9 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
         bottomMargin=20 * mm,
     )
 
-    font     = _UNICODE_FONT
-    font_b   = _UNICODE_FONT  # Bold variant (same file for DejaVu fallback)
+    font   = _UNICODE_FONT
+    font_b = _UNICODE_FONT + "-Bold" if _UNICODE_FONT == "DejaVuSans" else _UNICODE_FONT
+    lang   = data.language
 
     def style(size=10, bold=False, color=_DARK, align="LEFT"):
         return ParagraphStyle(
@@ -99,7 +99,7 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
     header_data = [[
         Paragraph(data.company_name, style(14, bold=True)),
         Paragraph(
-            f'<font color="#e63946"><b>{invoice_label(data.language)}</b></font>',
+            f'<font color="#e63946"><b>{invoice_label(lang)}</b></font>',
             style(22, align="RIGHT"),
         ),
     ]]
@@ -116,8 +116,8 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
             style(8, color=_GRAY),
         ),
         Paragraph(
-            f"{invoice_no_label(data.language)} <b>{data.invoice_number}</b><br/>"
-            f"{date_label(data.language)} {data.date}",
+            f"{invoice_no_label(lang)} <b>{data.invoice_number}</b><br/>"
+            f"{date_label(lang)} {data.date}",
             style(9, align="RIGHT"),
         ),
     ]]
@@ -128,25 +128,82 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
     story.append(sub_table)
     story.append(HRFlowable(width="100%", thickness=2, color=_DARK, spaceAfter=8))
 
-    # ── Bill To ───────────────────────────────────────────────
-    story.append(Paragraph(bill_to_label(data.language), style(8, color=_RED)))
-    story.append(Paragraph(f"<b>{data.client_name}</b>", style(12, bold=True)))
-    story.append(Paragraph(data.client_email, style(9, color=_GRAY)))
+    # ── Seller / Buyer blocks ─────────────────────────────────
+    seller_lines = [f"<b>{data.company_name}</b>"]
+    if data.company_reg_nr:
+        seller_lines.append(f"{reg_nr_label(lang)} {data.company_reg_nr}")
+    if data.company_vat_nr:
+        seller_lines.append(f"{vat_nr_label(lang)} {data.company_vat_nr}")
+    seller_lines.append(data.company_address)
+
+    buyer_lines = [f"<b>{data.client_name}</b>"]
+    if data.client_reg_nr:
+        buyer_lines.append(f"{reg_nr_label(lang)} {data.client_reg_nr}")
+    if data.client_vat_nr:
+        buyer_lines.append(f"{vat_nr_label(lang)} {data.client_vat_nr}")
+    if data.client_address:
+        buyer_lines.append(data.client_address)
+    buyer_lines.append(data.client_email)
+
+    party_data = [[
+        [Paragraph(seller_label(lang), style(8, color=_RED)),
+         Paragraph("<br/>".join(seller_lines), style(9))],
+        [Paragraph(buyer_label(lang), style(8, color=_RED)),
+         Paragraph("<br/>".join(buyer_lines), style(9))],
+    ]]
+    # Flatten to single row with two cells
+    party_table = Table(
+        [[
+            Table([[p] for p in party_data[0][0]], colWidths=["100%"]),
+            Table([[p] for p in party_data[0][1]], colWidths=["100%"]),
+        ]],
+        colWidths=["50%", "50%"],
+    )
+    party_table.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+    story.append(party_table)
     story.append(Spacer(1, 8 * mm))
 
     # ── Line items table ──────────────────────────────────────
-    formatted_amt = format_amount(data.amount, data.currency, data.language)
-    items = [
-        [
-            Paragraph(f"<b>{description_label(data.language)}</b>", style(9, bold=True)),
-            Paragraph(f"<b>{amount_label(data.language)}</b>", style(9, bold=True, align="RIGHT")),
-        ],
-        [
-            Paragraph(transaction_description(data.language, data.property_id), style(10)),
-            Paragraph(formatted_amt, style(10, align="RIGHT")),
-        ],
-    ]
-    item_table = Table(items, colWidths=["75%", "25%"])
+    has_line_items = bool(data.line_items)
+
+    if has_line_items:
+        # Full line items with qty, unit price, amount
+        header_row = [
+            Paragraph(f"<b>{description_label(lang)}</b>", style(9, bold=True)),
+            Paragraph(f"<b>{qty_label(lang)}</b>", style(9, bold=True, align="RIGHT")),
+            Paragraph(f"<b>{unit_price_label(lang)}</b>", style(9, bold=True, align="RIGHT")),
+            Paragraph(f"<b>{amount_label(lang)}</b>", style(9, bold=True, align="RIGHT")),
+        ]
+        rows = [header_row]
+        for item in data.line_items:
+            unit_str = f" {item.unit}" if item.unit else ""
+            rows.append([
+                Paragraph(item.description, style(10)),
+                Paragraph(f"{item.quantity:g}{unit_str}", style(10, align="RIGHT")),
+                Paragraph(format_amount(item.unit_price, data.currency, lang), style(10, align="RIGHT")),
+                Paragraph(format_amount(item.amount, data.currency, lang), style(10, align="RIGHT")),
+            ])
+
+        item_table = Table(rows, colWidths=["45%", "15%", "20%", "20%"])
+    else:
+        # Legacy: single line item
+        formatted_amt = format_amount(data.amount, data.currency, lang)
+        rows = [
+            [
+                Paragraph(f"<b>{description_label(lang)}</b>", style(9, bold=True)),
+                Paragraph(f"<b>{amount_label(lang)}</b>", style(9, bold=True, align="RIGHT")),
+            ],
+            [
+                Paragraph(transaction_description(lang, data.property_id), style(10)),
+                Paragraph(formatted_amt, style(10, align="RIGHT")),
+            ],
+        ]
+        item_table = Table(rows, colWidths=["75%", "25%"])
+
     item_table.setStyle(TableStyle([
         ("BACKGROUND",    (0, 0), (-1, 0),  _DARK),
         ("TEXTCOLOR",     (0, 0), (-1, 0),  colors.white),
@@ -160,32 +217,56 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
     story.append(item_table)
     story.append(Spacer(1, 4 * mm))
 
-    # ── Total ─────────────────────────────────────────────────
-    total_data = [[
+    # ── Totals ────────────────────────────────────────────────
+    total_rows = []
+
+    if has_line_items and data.vat_rate > 0:
+        total_rows.append([
+            Paragraph(""),
+            Paragraph(
+                f'{subtotal_label(lang)}&nbsp;&nbsp;{format_amount(data.subtotal, data.currency, lang)}',
+                style(10, align="RIGHT"),
+            ),
+        ])
+        vat_pct = int(data.vat_rate * 100)
+        total_rows.append([
+            Paragraph(""),
+            Paragraph(
+                f'{vat_label(lang)} {vat_pct}%:&nbsp;&nbsp;{format_amount(data.vat_amount, data.currency, lang)}',
+                style(10, align="RIGHT"),
+            ),
+        ])
+
+    display_total = data.total if data.total else data.amount
+    total_rows.append([
         Paragraph(""),
         Paragraph(
-            f'<b>{total_label(data.language)}&nbsp;&nbsp;{formatted_amt}</b>',
+            f'<b>{total_label(lang)}&nbsp;&nbsp;{format_amount(display_total, data.currency, lang)}</b>',
             style(13, bold=True, align="RIGHT"),
         ),
-    ]]
-    total_table = Table(total_data, colWidths=["50%", "50%"])
+    ])
+
+    total_table = Table(total_rows, colWidths=["50%", "50%"])
     total_table.setStyle(TableStyle([
         ("TOPPADDING",    (0, 0), (-1, -1), 4),
         ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("LINEABOVE",     (1, 0), (1, 0), 1.5, _DARK),
+        ("LINEABOVE",     (1, -1), (1, -1), 1.5, _DARK),
     ]))
     story.append(total_table)
     story.append(Spacer(1, 8 * mm))
 
     # ── Payment details ───────────────────────────────────────
-    story.append(Paragraph(payment_details_label(data.language), style(8, color=_RED)))
+    story.append(Paragraph(payment_details_label(lang), style(8, color=_RED)))
     pd_data = [
-        ["IBAN:",        data.company_iban],
-        [("Banka:" if data.language == "lv" else "Банк:" if data.language == "ru" else "Bank:"),
+        ["IBAN:", data.company_iban],
+        [("Banka:" if lang == "lv" else "Банк:" if lang == "ru" else "Bank:"),
          data.company_bank],
-        [("Mērķis:" if data.language == "lv" else "Назначение:" if data.language == "ru" else "Ref:"),
+        [("Mērķis:" if lang == "lv" else "Назначение:" if lang == "ru" else "Ref:"),
          data.invoice_number],
     ]
+    if data.payment_terms:
+        pd_data.append([payment_terms_label(lang), data.payment_terms])
+
     pd_rows = [[Paragraph(k, style(9, color=_GRAY)), Paragraph(f"<b>{v}</b>", style(9, bold=True))]
                for k, v in pd_data]
     pd_table = Table(pd_rows, colWidths=["25%", "75%"])
@@ -206,8 +287,11 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
     story.append(Spacer(1, 10 * mm))
     story.append(HRFlowable(width="100%", thickness=0.5, color=_GRAY))
     story.append(Spacer(1, 2 * mm))
+    footer_parts = [data.company_name, data.company_address]
+    if data.company_reg_nr:
+        footer_parts.append(f"{reg_nr_label(lang)} {data.company_reg_nr}")
     story.append(Paragraph(
-        f"{data.company_name} | {data.company_address}",
+        " | ".join(footer_parts),
         style(7, color=_GRAY, align="CENTER"),
     ))
 

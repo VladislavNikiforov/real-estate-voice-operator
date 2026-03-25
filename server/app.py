@@ -208,7 +208,7 @@ async def sse_events():
     )
 
 
-# ── GET /health  ──────────────────────────────────────────────
+# ── Health check ──────────────────────────────────────────────
 
 @app.get("/health")
 async def health():

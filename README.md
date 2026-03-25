@@ -1,38 +1,71 @@
 # Real Estate Voice Operator
 
-A voice-driven real estate operations assistant powered by [Vapi](https://vapi.ai) phone calls and automated via [Desktop Commander](https://github.com/wonderwhy-er/DesktopCommanderMCP).
+A voice-driven business operations assistant. Call a phone number, ask to send an invoice — it looks up the client and service from Notion, generates a PDF, sends the email via Gmail, uploads to Drive, and notifies you on Telegram.
 
-**Hackathon build — 10 hours, ships working.**
+**Hackathon build** | Demo company: SIA "TEIKUMS JT"
 
 ---
 
 ## Architecture
 
+Two parallel approaches — ElevenLabs-managed and Claude-as-brain:
+
+### Approach 1: ElevenLabs-managed (master)
+
 ```
-Agent speaks command (phone call via Vapi)
+Phone call (ElevenLabs Conversational AI)
         │
         ▼
-Vapi STT + LLM  ──tool-call──▶  Our FastAPI Webhook
+ElevenLabs STT + LLM  ──webhook──▶  FastAPI Server
                                         │
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
-              Generate PDF       Upload to Drive      Draft email
-              (reportlab)       (Google Drive API)  (txt templates)
-                    │                   │                   │
-                    └───────────────────┴───────────────────┘
-                                        │
-                                        ▼
-                              Build OpenClaw prompt
-                                        │
-                              POST to OpenClaw VM
-                                        │
-                                        ▼
-                          Desktop Commander opens Gmail
-                          → composes → sends email
-                                        │
-                                        ▼
-                         Vapi speaks confirmation to caller
+           Notion lookup        Generate PDF          Search Gmail
+        (client & service)     (reportlab +           (Gmail API)
+                               DejaVu fonts)
+                    │                   │
+                    ▼                   ▼
+              Draft email        Upload to Drive
+           (templates EN/LV/RU)  (Google Drive API)
+                    │                   │
+                    └───────────────────┘
+                              │
+                              ▼
+                     Send via Gmail API
+                    (OAuth2, with PDF attachment)
+                              │
+                              ▼
+                    Telegram notification
+                              │
+                              ▼
+                  ElevenLabs speaks confirmation
 ```
+
+### Approach 2: Claude as brain (claude-brain branch)
+
+```
+Voice/Text input
+        │
+        ▼
+  POST /api/chat  ──▶  Claude API (tool_use)
+                              │
+              ┌───────────────┼───────────────┐
+              ▼               ▼               ▼
+       lookup_client   lookup_service   create_invoice
+       (Notion API)    (Notion API)         │
+                                    ┌───────┼───────┐
+                                    ▼       ▼       ▼
+                               Gen PDF  Upload   Send email
+                                        Drive    (SMTP/Gmail)
+                                            │
+                                            ▼
+                                    Telegram notify
+                                            │
+                                            ▼
+                                   Response text for TTS
+```
+
+Claude handles multi-turn conversation natively — looks up data, asks for confirmation, then executes. Single `/api/chat` endpoint replaces three separate tool endpoints.
 
 ---
 
@@ -44,65 +77,133 @@ Vapi STT + LLM  ──tool-call──▶  Our FastAPI Webhook
 pip install -r requirements.txt
 ```
 
-### 2. Configure environment
+### 2. Set up Gmail API
+
+```bash
+# 1. Create project at https://console.cloud.google.com
+# 2. Enable Gmail API
+# 3. Create OAuth2 credentials (Desktop app)
+# 4. Download JSON → save as credentials/gmail_credentials.json
+
+python scripts/gmail_setup.py
+# Browser opens → sign in → done
+```
+
+### 3. Configure environment
 
 ```bash
 cp .env.example .env
-# Edit .env with your values
+# Fill in: ANTHROPIC_API_KEY, NOTION_TOKEN, TELEGRAM_BOT_TOKEN, etc.
 ```
 
-Required for full functionality:
-- `OPENCLAW_URL` — URL of the OpenClaw VM server
-- Google Drive: place `service_account.json` in project root (or set `GDRIVE_SERVICE_ACCOUNT_PATH`)
-
-All other vars have defaults for local development.
-
-### 3. Start the server
+### 4. Start the server
 
 ```bash
-# Start mock OpenClaw + main server
-bash scripts/start_dev.sh
-
-# Or just the main server
 python main.py
 ```
 
 Server runs on `http://localhost:8000`.
 
-### 4. Expose to Vapi (development)
+### 5. Expose for ElevenLabs (development)
 
 ```bash
 ngrok http 8000
-# Copy the https URL → set as Vapi server URL
+# Copy the https URL → configure in ElevenLabs dashboard
 ```
 
 ---
 
-## Testing
+## Notion — Company OS
 
-### Offline pipeline test (no server needed, no API keys)
+Client and service data is stored in Notion. The agent queries these databases when creating invoices.
+
+### Clients DB
+
+| Property | Type | Example |
+|---|---|---|
+| Nosaukums | title | SIA "Desktop Commander" |
+| Reģ. nr. | text | 40203666483 |
+| PVN nr. | text | LV40203666483 |
+| Adrese | text | Elizabetes iela 8-6, Rīga, LV-1010 |
+| E-pasts | email | jurgis@desktopcommander.lv |
+| Banka / IBAN | text | Swedbank / LV80HABA... |
+| Apmaksas termiņš | select | 7 / 14 / 30 dienas |
+
+### Services DB
+
+| Property | Type | Example |
+|---|---|---|
+| Pakalpojums | title | Venue Rental |
+| Likme (EUR) | number | 150 |
+| Mērvienība | select | stunda / diena / projekts |
+| PVN likme (%) | number | 0.21 |
+| Kategorija | select | Telpa |
+
+Pre-loaded: 5 clients, 5 services. See `OPERATOR_PLAN.md` for full schema and API examples.
+
+---
+
+## Claude Brain (`/api/chat`)
+
+The `claude-brain` branch adds Claude API as the conversation engine with native tool_use.
+
+### How it works
+
+1. Send text to `/api/chat` with a session ID
+2. Claude decides which tools to call (lookup_client, lookup_service, create_invoice)
+3. Tools execute directly in Python — no HTTP round-trips
+4. Claude confirms details with user before executing
+5. Multi-turn conversation state maintained per session
+
+### Example conversation
 
 ```bash
-python scripts/test_full_pipeline.py
+# Turn 1: Request
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"session_id": "s1", "text": "Invoice Desktop Commander for 8 hours venue rental"}'
+
+# Response: Claude looks up client + service, presents summary, asks to confirm
+# {
+#   "text": "Klientam: SIA Desktop Commander. Venue Rental 8h × 150 EUR = 1200 EUR + PVN 252 EUR = 1452 EUR. Apstiprināt?",
+#   "actions_taken": [{"tool": "lookup_client", ...}, {"tool": "lookup_service", ...}]
+# }
+
+# Turn 2: Confirm
+curl -X POST http://localhost:8000/api/chat \
+  -d '{"session_id": "s1", "text": "yes, send it"}'
+
+# Response: Invoice created, PDF generated, email sent
+# {
+#   "text": "Rēķins INV-2026-1001 par 1 452,00 EUR izveidots un nosūtīts.",
+#   "actions_taken": [{"tool": "create_invoice", ...}]
+# }
 ```
 
-This tests: PDF generation → mock Drive upload → email drafting → OpenClaw prompt building.
-
-### Unit tests
+### Reset session
 
 ```bash
-pytest tests/ -v
+curl -X POST http://localhost:8000/api/chat/reset \
+  -d '{"session_id": "s1"}'
 ```
 
-### Live server test (server must be running)
+---
 
-```bash
-# Terminal 1
-python main.py
+## ElevenLabs Setup
 
-# Terminal 2
-python scripts/test_call.py
-```
+1. Create a Conversational AI agent at [elevenlabs.io](https://elevenlabs.io)
+2. Paste `elevenlabs_config/agent_prompt.md` as the system prompt
+3. Add 3 server tools, each pointing to your server:
+
+| Tool | URL |
+|---|---|
+| `lookup_contact` | `https://YOUR_URL/api/tools/lookup-contact` |
+| `search_emails` | `https://YOUR_URL/api/tools/search-emails` |
+| `create_task` | `https://YOUR_URL/api/tools/create-task` |
+
+4. Assign a phone number (ElevenLabs or Twilio)
+
+See `elevenlabs_config/setup_guide.md` for detailed parameter schemas.
 
 ---
 
@@ -111,66 +212,51 @@ python scripts/test_call.py
 ```
 real-estate-voice-operator/
 ├── server/
-│   ├── app.py              # FastAPI app, endpoints
-│   ├── vapi_handler.py     # Vapi tool-call dispatcher
-│   └── config.py           # Env vars, config
+│   ├── app.py                 # FastAPI: ElevenLabs tools + /api/chat (Claude)
+│   ├── elevenlabs_handler.py  # ElevenLabs tool dispatcher
+│   └── config.py              # All env vars and config
+├── brain/
+│   ├── claude_brain.py        # Claude API conversation handler + tool loop
+│   ├── system_prompt.py       # System prompt + tool definitions
+│   └── tools.py               # Tool execution (Notion, PDF, email)
+├── gmail/
+│   └── sender.py              # Gmail API: send + search (OAuth2)
+├── email_sender/
+│   └── sender.py              # SMTP direct email (alternative to Gmail)
+├── notion/
+│   └── client.py              # Notion API: client & service lookup
 ├── llm/
-│   ├── models.py           # Pydantic models (InvoiceData, EmailDraft, etc.)
-│   ├── orchestrator.py     # Main pipeline brain
-│   └── prompts.py          # Success message templates
+│   ├── models.py              # Pydantic models (InvoiceData, LineItem, etc.)
+│   ├── orchestrator.py        # Main pipeline: PDF → Drive → Email → Telegram
+│   └── prompts.py             # Success message templates
 ├── pdf_generator/
-│   ├── invoice.py          # reportlab PDF generation
-│   └── templates.py        # Locale-aware formatters
+│   ├── invoice.py             # reportlab PDF (seller/buyer, line items, VAT)
+│   ├── templates.py           # Locale-aware formatters (LV/RU/EN)
+│   ├── DejaVuSans.ttf         # Bundled font for Latvian/Cyrillic
+│   └── DejaVuSans-Bold.ttf
 ├── email_drafter/
-│   ├── drafter.py          # Template loader + renderer
-│   └── templates/          # 12 txt templates (4 actions × 3 languages)
-├── openclaw_prompt/
-│   ├── generator.py        # Build OpenClawInstruction
-│   └── templates.py        # Gmail prompt templates
+│   ├── drafter.py             # Template loader + renderer
+│   └── templates/             # 12 txt templates (4 actions × 3 languages)
 ├── gdrive/
-│   └── uploader.py         # Drive upload + local fallback
-├── openclaw/               # TODO: OpenClaw person implements this
-│   ├── receiver.py         # FastAPI receiver skeleton
-│   ├── desktop_commander.py
-│   └── gmail_flow.py
-├── mock/
-│   ├── mock_openclaw.py    # Fake OpenClaw server (port 8888)
-│   └── mock_gdrive.py      # Fake Drive upload
-├── vapi_config/
-│   ├── assistant_prompt.md # Paste into Vapi dashboard
-│   ├── tools.json          # Tool definitions for Vapi
-│   └── setup_guide.md      # Step-by-step Vapi setup
-├── tests/                  # pytest test suite
+│   └── uploader.py            # Drive upload + local fallback
+├── telegram/
+│   └── bot.py                 # Telegram notifications
+├── data/
+│   └── contacts.json          # Local contact fallback
+├── elevenlabs_config/
+│   ├── agent_prompt.md        # System prompt for ElevenLabs agent
+│   └── setup_guide.md         # ElevenLabs setup guide
+├── samples/
+│   └── invoice_sample_*.pdf   # Sample generated invoices
 ├── scripts/
-│   ├── start_dev.sh        # Dev startup
-│   ├── test_call.py        # Live server tests
+│   ├── gmail_setup.py         # One-time Gmail OAuth2 setup
 │   └── test_full_pipeline.py  # Offline pipeline test
-└── main.py                 # Entry point
+├── credentials/               # .gitignored — OAuth tokens
+├── tests/                     # pytest test suite
+├── main.py                    # Entry point
+├── OPERATOR_PLAN.md           # Full project plan + Notion schema
+└── requirements.txt
 ```
-
----
-
-## Supported Operations
-
-| Voice command | Action | Languages |
-|---|---|---|
-| "Send invoice to [name] for [property]" | `send_invoice` | LV / RU / EN |
-| "Send payment reminder to [name]" | `send_reminder` | LV / RU / EN |
-| "Follow up with [name] about [property]" | `follow_up` | LV / RU / EN |
-| "Request documents from [name]" | `request_documents` | LV / RU / EN |
-
----
-
-## Vapi Setup
-
-See [`vapi_config/setup_guide.md`](vapi_config/setup_guide.md) for the full 10-step guide.
-
-Quick version:
-1. Create Vapi assistant
-2. Paste [`vapi_config/assistant_prompt.md`](vapi_config/assistant_prompt.md) as system prompt
-3. Add tools from [`vapi_config/tools.json`](vapi_config/tools.json)
-4. Set server URL to `https://YOUR_NGROK_URL/api/vapi/tool-call`
-5. Call the number and speak your command
 
 ---
 
@@ -178,36 +264,52 @@ Quick version:
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/api/vapi/tool-call` | Main Vapi webhook |
-| `POST` | `/api/test` | Direct test (no Vapi wrapper needed) |
+| `POST` | `/api/chat` | Claude brain: send text, get response + tool results |
+| `POST` | `/api/chat/reset` | Reset a Claude chat session |
+| `POST` | `/api/tools/lookup-contact` | ElevenLabs tool: find contact by name |
+| `POST` | `/api/tools/search-emails` | ElevenLabs tool: search Gmail inbox |
+| `POST` | `/api/tools/create-task` | ElevenLabs tool: invoice/reminder/follow-up |
+| `POST` | `/api/test` | Direct test (no ElevenLabs/Claude needed) |
 | `GET` | `/health` | Health check |
 
-### Direct test example
+---
+
+## Supported Operations
+
+| Voice command | Action | Languages |
+|---|---|---|
+| "Send invoice to [name] for [service]" | `send_invoice` | LV / RU / EN |
+| "Send payment reminder to [name]" | `send_reminder` | LV / RU / EN |
+| "Follow up with [name] about [property]" | `follow_up` | LV / RU / EN |
+| "Request documents from [name]" | `request_documents` | LV / RU / EN |
+
+---
+
+## Testing
 
 ```bash
-curl -X POST http://localhost:8000/api/test \
-  -H "Content-Type: application/json" \
-  -d '{
-    "tool": "send_invoice",
-    "client_name": "Jānis Bērziņš",
-    "client_email": "janis@example.lv",
-    "property_id": "apt-3",
-    "amount": 85000,
-    "language": "lv"
-  }'
+# Unit tests
+pytest tests/ -v
+
+# Offline pipeline test
+python scripts/test_full_pipeline.py
 ```
 
 ---
 
-## OpenClaw Integration
+## Environment Variables
 
-The `openclaw/` directory is the integration point for the Desktop Commander automation. It receives a structured prompt and executes Gmail actions.
+See `.env.example` for all variables. Key ones:
 
-See [`openclaw/README.md`](openclaw/README.md) for the TODO list and integration options.
-
----
-
-## Team
-
-- **Voice Person** — Vapi setup, FastAPI webhook, pipeline orchestration (this repo)
-- **OpenClaw Person** — Desktop Commander VM, Gmail automation (`openclaw/` directory)
+| Variable | Required | Description |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | For `/api/chat` | Claude API key (brain) |
+| `GMAIL_CREDENTIALS_PATH` | For email | Path to OAuth2 credentials JSON |
+| `NOTION_TOKEN` | For DB lookup | Notion integration token |
+| `NOTION_CLIENTS_DB` | For DB lookup | Notion Clients database ID |
+| `NOTION_SERVICES_DB` | For DB lookup | Notion Services database ID |
+| `TELEGRAM_BOT_TOKEN` | No | Telegram bot for notifications |
+| `TELEGRAM_CHAT_ID` | No | Telegram chat to notify |
+| `GDRIVE_CREDENTIALS_PATH` | No | Google Drive service account |
+| `GDRIVE_FOLDER_ID` | No | Drive folder for invoice PDFs |
+| `SMTP_HOST` / `SMTP_USER` / `SMTP_PASSWORD` | For SMTP email | Direct SMTP (alternative to Gmail) |

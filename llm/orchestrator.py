@@ -23,6 +23,7 @@ from llm.models import (
     InvoiceData, LineItem, PipelineResult,
     SendInvoiceParams, SendReminderParams, FollowUpParams, RequestDocumentsParams,
 )
+from notion.client import lookup_client, lookup_service
 from llm.prompts import SUCCESS_MESSAGES, ERROR_MESSAGE
 from pdf_generator.invoice import generate_invoice_pdf
 from pdf_generator.templates import format_amount, format_date

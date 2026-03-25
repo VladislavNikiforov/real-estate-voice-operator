@@ -1,5 +1,6 @@
 """email_drafter/drafter.py — Compose email subject + body from templates."""
 
+from __future__ import annotations
 from pathlib import Path
 from server.config import (
     COMPANY_NAME, COMPANY_BANK, COMPANY_IBAN, COMPANY_PHONE
