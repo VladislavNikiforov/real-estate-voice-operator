@@ -5,16 +5,38 @@ from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 
+class LineItem(BaseModel):
+    description: str
+    quantity: float
+    unit: str = ""               # "stunda", "gab.", etc.
+    unit_price: float
+    amount: float                # quantity * unit_price
+
+
 class InvoiceData(BaseModel):
     invoice_number: str
     client_name: str
     client_email: str
-    property_id: str
-    amount: float
+    client_reg_nr: str = ""
+    client_vat_nr: str = ""
+    client_address: str = ""
+    client_bank: str = ""
+    client_iban: str = ""
+    payment_terms: str = ""      # "30 dienas"
+    line_items: list[LineItem] = []
+    subtotal: float = 0.0
+    vat_rate: float = 0.0        # e.g. 0.21
+    vat_amount: float = 0.0
+    total: float = 0.0
+    # Legacy fields (kept for backward compat with simple flow)
+    property_id: str = ""
+    amount: float = 0.0
     currency: str = "EUR"
     language: str
     date: str                    # "25.03.2026"
     company_name: str
+    company_reg_nr: str = ""
+    company_vat_nr: str = ""
     company_address: str
     company_bank: str
     company_iban: str
@@ -53,10 +75,12 @@ class PipelineResult(BaseModel):
 
 class SendInvoiceParams(BaseModel):
     client_name: str
-    client_email: str
-    property_id: str
-    amount: float
-    language: str
+    client_email: str = ""       # optional — looked up from Notion if empty
+    service_name: str = ""       # looked up in Services DB for rate
+    quantity: float = 1.0
+    amount: float = 0.0          # optional — calculated from service if 0
+    property_id: str = ""        # legacy, optional
+    language: str = "lv"
     notes: Optional[str] = None
 
 
