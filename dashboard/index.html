@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Operator — Live Pipeline</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+    background: #0a0a1a;
+    color: #e0e0e0;
+    min-height: 100vh;
+    padding: 2rem;
+  }
+
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid #1a1a3e;
+  }
+
+  .header h1 {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .header h1 span { color: #e63946; }
+
+  .status-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+    background: #666;
+  }
+  .status-dot.connected { background: #22c55e; animation: pulse 2s infinite; }
+  .status-dot.disconnected { background: #e63946; }
+
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    max-width: 1400px;
+  }
+
+  .panel {
+    background: #111128;
+    border: 1px solid #1a1a3e;
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+
+  .panel-title {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #e63946;
+    margin-bottom: 1rem;
+  }
+
+  /* Transcript */
+  #transcript-area {
+    min-height: 80px;
+    font-size: 1.2rem;
+    color: #fff;
+    line-height: 1.6;
+  }
+  #transcript-area .user { color: #60a5fa; }
+  #transcript-area .assistant { color: #a78bfa; }
+  #transcript-area .label { color: #666; font-size: 0.8rem; margin-right: 0.5rem; }
+
+  /* Pipeline steps */
+  .step {
+    display: flex;
+    align-items: flex-start;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid #1a1a2e;
+    gap: 0.75rem;
+  }
+  .step:last-child { border-bottom: none; }
+
+  .step-icon {
+    width: 28px; height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .step-icon.pending { background: #1a1a3e; color: #444; }
+  .step-icon.running { background: #1a1a3e; color: #facc15; animation: spin 1s linear infinite; }
+  .step-icon.done { background: #166534; color: #22c55e; }
+  .step-icon.waiting { background: #78350f; color: #facc15; }
+  .step-icon.error { background: #7f1d1d; color: #ef4444; }
+
+  @keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .step-body { flex: 1; }
+  .step-label { font-size: 0.9rem; color: #e0e0e0; }
+  .step-detail { font-size: 0.75rem; color: #888; margin-top: 2px; }
+  .step-time { font-size: 0.7rem; color: #555; white-space: nowrap; margin-top: 4px; }
+
+  /* Invoice preview */
+  #invoice-preview {
+    display: none;
+    background: #0f0f24;
+    border: 1px solid #e63946;
+    border-radius: 8px;
+    padding: 1.2rem;
+    margin-top: 1rem;
+  }
+  #invoice-preview.visible { display: block; animation: slideIn 0.3s ease-out; }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .invoice-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.3rem 0;
+  }
+  .invoice-row .label { color: #888; }
+  .invoice-row .value { color: #fff; font-weight: 600; }
+  .invoice-row .value.big { font-size: 1.3rem; color: #22c55e; }
+
+  /* Response */
+  #response-area {
+    min-height: 60px;
+    font-size: 1rem;
+    color: #a78bfa;
+    line-height: 1.5;
+    font-style: italic;
+  }
+
+  .full-width { grid-column: 1 / -1; }
+
+  /* Connection banner */
+  .conn-banner {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    background: #e63946;
+    color: #fff;
+    text-align: center;
+    padding: 6px;
+    font-size: 0.8rem;
+    display: none;
+    z-index: 100;
+  }
+  .conn-banner.show { display: block; }
+</style>
+</head>
+<body>
+
+<div class="conn-banner" id="conn-banner">Reconnecting to server...</div>
+
+<div class="header">
+  <h1><span>OPERATOR</span> — Live Pipeline</h1>
+  <div>
+    <span class="status-dot" id="status-dot"></span>
+    <span id="status-text" style="font-size: 0.8rem; color: #666;">connecting...</span>
+  </div>
+</div>
+
+<div class="grid">
+  <!-- Transcript -->
+  <div class="panel full-width">
+    <div class="panel-title">Conversation</div>
+    <div id="transcript-area">
+      <span style="color: #444;">Waiting for input...</span>
+    </div>
+  </div>
+
+  <!-- Pipeline Steps -->
+  <div class="panel">
+    <div class="panel-title">Pipeline Steps</div>
+    <div id="steps-area">
+      <!-- Steps are added dynamically -->
+    </div>
+  </div>
+
+  <!-- Right column: Invoice + Response -->
+  <div>
+    <div class="panel">
+      <div class="panel-title">Operator Response</div>
+      <div id="response-area">
+        <span style="color: #444;">Waiting...</span>
+      </div>
+    </div>
+
+    <div id="invoice-preview">
+      <div class="panel-title" style="color: #e63946;">Invoice Generated</div>
+      <div class="invoice-row">
+        <span class="label">Number</span>
+        <span class="value" id="inv-number">—</span>
+      </div>
+      <div class="invoice-row">
+        <span class="label">Client</span>
+        <span class="value" id="inv-client">—</span>
+      </div>
+      <div class="invoice-row">
+        <span class="label">Total</span>
+        <span class="value big" id="inv-total">—</span>
+      </div>
+      <div class="invoice-row" id="inv-link-row" style="display:none;">
+        <span class="label">PDF</span>
+        <a class="value" id="inv-link" href="#" target="_blank" style="color: #60a5fa; text-decoration: none;">Open</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const stepsArea = document.getElementById('steps-area');
+const transcriptArea = document.getElementById('transcript-area');
+const responseArea = document.getElementById('response-area');
+const statusDot = document.getElementById('status-dot');
+const statusText = document.getElementById('status-text');
+const connBanner = document.getElementById('conn-banner');
+const invoicePreview = document.getElementById('invoice-preview');
+
+let firstMessage = true;
+let stepElements = {};
+
+function setConnected(connected) {
+  statusDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
+  statusText.textContent = connected ? 'live' : 'disconnected';
+  connBanner.className = 'conn-banner' + (connected ? '' : ' show');
+}
+
+function addStep(id, label, status, detail, timeMs) {
+  let el = stepElements[id];
+  if (!el) {
+    el = document.createElement('div');
+    el.className = 'step';
+    el.innerHTML = `
+      <div class="step-icon pending" id="icon-${id}">&#9675;</div>
+      <div class="step-body">
+        <div class="step-label" id="label-${id}"></div>
+        <div class="step-detail" id="detail-${id}"></div>
+      </div>
+      <div class="step-time" id="time-${id}"></div>
+    `;
+    stepsArea.appendChild(el);
+    stepElements[id] = el;
+  }
+
+  const icon = document.getElementById('icon-' + id);
+  const labelEl = document.getElementById('label-' + id);
+  const detailEl = document.getElementById('detail-' + id);
+  const timeEl = document.getElementById('time-' + id);
+
+  labelEl.textContent = label;
+  if (detail) detailEl.textContent = detail;
+
+  if (status === 'running') {
+    icon.className = 'step-icon running';
+    icon.innerHTML = '&#8987;';
+  } else if (status === 'done') {
+    icon.className = 'step-icon done';
+    icon.innerHTML = '&#10003;';
+    if (timeMs) timeEl.textContent = (timeMs / 1000).toFixed(1) + 's';
+  } else if (status === 'waiting') {
+    icon.className = 'step-icon waiting';
+    icon.innerHTML = '&#8986;';
+  } else if (status === 'error') {
+    icon.className = 'step-icon error';
+    icon.innerHTML = '&#10007;';
+  }
+}
+
+function appendTranscript(role, text) {
+  if (firstMessage) {
+    transcriptArea.innerHTML = '';
+    firstMessage = false;
+  }
+  const div = document.createElement('div');
+  div.style.marginBottom = '0.5rem';
+  const label = role === 'user' ? 'YOU' : 'OPERATOR';
+  div.innerHTML = `<span class="label">${label}</span><span class="${role}">${escapeHtml(text)}</span>`;
+  transcriptArea.appendChild(div);
+  transcriptArea.scrollTop = transcriptArea.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function handleEvent(evt) {
+  const d = JSON.parse(evt.data);
+
+  switch (d.type) {
+    case 'transcript':
+      appendTranscript('user', d.text);
+      break;
+
+    case 'step_start':
+      addStep(d.step, d.label, 'running', d.detail);
+      break;
+
+    case 'step_done':
+      addStep(d.step, d.label, 'done', d.detail, d.duration_ms);
+      break;
+
+    case 'step_waiting':
+      addStep(d.step, d.label, 'waiting', d.detail);
+      break;
+
+    case 'response':
+      responseArea.textContent = d.text;
+      appendTranscript('assistant', d.text);
+      break;
+
+    case 'invoice':
+      document.getElementById('inv-number').textContent = d.invoice_number;
+      document.getElementById('inv-client').textContent = d.client;
+      document.getElementById('inv-total').textContent = d.total || '—';
+      if (d.drive_link && !d.drive_link.startsWith('file://')) {
+        document.getElementById('inv-link').href = d.drive_link;
+        document.getElementById('inv-link-row').style.display = 'flex';
+      }
+      invoicePreview.className = 'visible';
+      break;
+
+    case 'error':
+      addStep('error', 'Error', 'error', d.message);
+      break;
+
+    case 'reset':
+      stepsArea.innerHTML = '';
+      stepElements = {};
+      transcriptArea.innerHTML = '<span style="color: #444;">Waiting for input...</span>';
+      responseArea.innerHTML = '<span style="color: #444;">Waiting...</span>';
+      invoicePreview.className = '';
+      firstMessage = true;
+      break;
+  }
+}
+
+function connect() {
+  const es = new EventSource('/api/events');
+
+  es.onopen = () => setConnected(true);
+  es.onmessage = handleEvent;
+  es.onerror = () => {
+    setConnected(false);
+    es.close();
+    setTimeout(connect, 2000);
+  };
+}
+
+connect();
+</script>
+</body>
+</html>

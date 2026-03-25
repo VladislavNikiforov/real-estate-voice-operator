@@ -1,13 +1,17 @@
 """server/app.py — FastAPI webhook server for ElevenLabs Conversational AI."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from server.elevenlabs_handler import lookup_contact, search_emails, create_task
 from brain.claude_brain import chat as claude_chat, clear_session
+from dashboard.events import subscribe, unsubscribe
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -136,6 +140,40 @@ async def test_endpoint(request: Request):
         result = await create_task(params)
 
     return JSONResponse({"tool": tool, "result": result})
+
+
+# ── Dashboard ─────────────────────────────────────────────────
+
+@app.get("/dashboard")
+async def dashboard():
+    """Serve the live pipeline dashboard."""
+    html_path = Path(__file__).parent.parent / "dashboard" / "index.html"
+    return HTMLResponse(html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/api/events")
+async def sse_events():
+    """Server-Sent Events stream for the dashboard."""
+    q = subscribe()
+
+    async def event_stream():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            unsubscribe(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── Health check ──────────────────────────────────────────────
