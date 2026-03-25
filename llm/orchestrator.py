@@ -1,12 +1,23 @@
-"""llm/orchestrator.py — Main pipeline brain. Never crashes. Always returns a speakable result."""
+"""llm/orchestrator.py — Main pipeline brain. Never crashes. Always returns a speakable result.
+
+Email sending flow:
+  1. Generate PDF → save to generated_files/
+  2. Draft email subject + body
+  3. Send via sendmail_skill (Node.js Puppeteer → Chrome port 9222 → Gmail)
+"""
 
 import asyncio
 import datetime
 import logging
+import os
+import subprocess
+from pathlib import Path
 
+from dashboard.events import emit_step_start, emit_step_done, emit_invoice, emit_email_sent
 from server.config import (
     COMPANY_NAME, COMPANY_REG_NR, COMPANY_VAT_NR,
     COMPANY_ADDRESS, COMPANY_BANK, COMPANY_IBAN, COMPANY_PHONE,
+    CHROME_DEBUG_PORT,
 )
 from llm.models import (
     InvoiceData, LineItem, PipelineResult,
@@ -16,12 +27,16 @@ from notion.client import lookup_client, lookup_service
 from llm.prompts import SUCCESS_MESSAGES, ERROR_MESSAGE
 from pdf_generator.invoice import generate_invoice_pdf
 from pdf_generator.templates import format_amount, format_date
-from gdrive.uploader import upload_to_drive
 from email_drafter.drafter import draft_email
-from gmail.sender import send_email
-from telegram.bot import notify_task_complete
 
 log = logging.getLogger(__name__)
+
+# Directory where PDFs are saved locally
+_GENERATED_DIR = Path(__file__).parent.parent / "generated_files"
+_GENERATED_DIR.mkdir(exist_ok=True)
+
+# Path to the sendmail_skill script
+_SENDMAIL_SCRIPT = Path(__file__).parent.parent / "scripts" / "sendmail_skill" / "send-gmail.js"
 
 # ── Invoice counter (in-memory for hackathon) ─────────────────
 _invoice_counter = 1000
@@ -34,71 +49,127 @@ def _next_invoice_number() -> str:
     return f"INV-{year}-{_invoice_counter:04d}"
 
 
+# ── sendmail_skill caller ─────────────────────────────────────
+
+async def _send_via_sendmail_skill(
+    to: str,
+    subject: str,
+    body: str,
+    pdf_path: str | None = None,
+) -> bool:
+    """Call the Node.js sendmail_skill script to send email via Chrome/Gmail.
+
+    Requires Chrome running with --remote-debugging-port=CHROME_DEBUG_PORT.
+    Returns True on success.
+    """
+    if not _SENDMAIL_SCRIPT.exists():
+        log.error(f"sendmail_skill not found at {_SENDMAIL_SCRIPT}")
+        return False
+
+    cmd = [
+        "node", str(_SENDMAIL_SCRIPT),
+        "--to", to,
+        "--subject", subject,
+        "--body", body,
+    ]
+    if pdf_path and Path(pdf_path).exists():
+        cmd += ["--file", pdf_path]
+    if CHROME_DEBUG_PORT != 9222:
+        cmd += ["--port", str(CHROME_DEBUG_PORT)]
+
+    log.info(f"sendmail_skill: sending to {to} | subject: {subject}")
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=90)
+        out = stdout.decode().strip()
+        err = stderr.decode().strip()
+
+        log.info(f"sendmail_skill stdout: {out}")
+        if err:
+            log.warning(f"sendmail_skill stderr: {err}")
+
+        if proc.returncode == 0 and "SUCCESS" in out:
+            log.info(f"Email sent successfully to {to}")
+            return True
+        else:
+            log.error(f"sendmail_skill failed (exit {proc.returncode}): {err or out}")
+            return False
+
+    except asyncio.TimeoutError:
+        log.error("sendmail_skill timed out after 90s")
+        return False
+    except FileNotFoundError:
+        log.error("node not found — is Node.js installed?")
+        return False
+    except Exception as exc:
+        log.error(f"sendmail_skill error: {exc}", exc_info=True)
+        return False
+
+
 # ── Public handlers ───────────────────────────────────────────
 
 async def handle_send_invoice(params: dict) -> PipelineResult:
-    """Full pipeline: Notion lookup → PDF → Drive → Gmail API send → Telegram notify."""
+    """Full pipeline: Notion lookup → PDF → save locally → sendmail_skill."""
     lang = params.get("language", "lv")
     try:
         p = SendInvoiceParams(**params)
     except Exception as exc:
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
 
-    # ── Step 0: Look up client and service from Notion ────────
+    # ── Step 0: Notion lookup (best-effort) ───────────────────
     client_data = None
     service_data = None
 
     try:
+        from notion.client import lookup_client, lookup_service
         client_data = await lookup_client(p.client_name)
-    except Exception as exc:
-        log.warning(f"Notion client lookup failed: {exc}")
-
-    if p.service_name:
-        try:
+        if p.service_name:
             service_data = await lookup_service(p.service_name)
-        except Exception as exc:
-            log.warning(f"Notion service lookup failed: {exc}")
+    except Exception as exc:
+        log.warning(f"Notion lookup skipped: {exc}")
 
-    # Resolve client email: param > Notion > empty
+    # Resolve email
     client_email = p.client_email or (client_data or {}).get("E-pasts", "")
     if not client_email:
         return PipelineResult(
             success=False, message=_err(lang),
-            error=f"No email found for client '{p.client_name}'",
+            error=f"No email found for '{p.client_name}'",
         )
 
-    # Calculate amount from service rate x quantity, or use explicit amount
+    # Resolve amounts
+    unit_price = p.amount
     vat_rate = 0.0
     unit = ""
-    unit_price = p.amount
-    line_items = []
+    service_desc = p.service_name or p.property_id or "Service"
 
     if service_data:
         unit_price = service_data.get("Likme (EUR)", 0) or p.amount
-        vat_rate = service_data.get("PVN likme (%)", 0) or 0.0
-        unit = service_data.get("Mērvienība", "")
-        service_desc = service_data.get("Pakalpojums", p.service_name)
-    else:
-        service_desc = p.service_name or p.property_id or "Service"
-        if p.amount:
-            unit_price = p.amount
+        vat_rate   = service_data.get("PVN likme (%)", 0) or 0.0
+        unit       = service_data.get("Mērvienība", "")
+        service_desc = service_data.get("Pakalpojums", service_desc)
 
-    subtotal = p.quantity * unit_price
+    subtotal   = round(p.quantity * unit_price, 2)
     vat_amount = round(subtotal * vat_rate, 2)
-    total = round(subtotal + vat_amount, 2)
+    total      = round(subtotal + vat_amount, 2)
 
-    line_items.append(LineItem(
+    line_items = [LineItem(
         description=service_desc,
         quantity=p.quantity,
         unit=unit,
         unit_price=unit_price,
         amount=subtotal,
-    ))
+    )]
 
     invoice_number = _next_invoice_number()
     date_str = format_date(lang)
 
     # ── Step 1: Generate PDF ──────────────────────────────────
+    emit_step_start("pdf", "Generate PDF", f"{invoice_number}")
     log.info(f"[{invoice_number}] Generating PDF...")
     try:
         data = InvoiceData(
@@ -131,83 +202,73 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         )
         pdf_bytes = generate_invoice_pdf(data)
         log.info(f"[{invoice_number}] PDF generated ({len(pdf_bytes):,} bytes)")
+        emit_step_done("pdf", "Generate PDF", f"{len(pdf_bytes):,} bytes")
     except Exception as exc:
         log.error(f"PDF generation failed: {exc}", exc_info=True)
         return PipelineResult(success=False, message=_err(lang), error=f"PDF error: {exc}")
 
-    # ── Step 2: Upload to Drive ───────────────────────────────
-    log.info(f"[{invoice_number}] Uploading to Drive...")
+    # ── Step 2: Save PDF locally ──────────────────────────────
+    pdf_filename = f"invoice_{invoice_number}.pdf"
+    pdf_path = str(_GENERATED_DIR / pdf_filename)
     try:
-        filename = f"invoice_{invoice_number}.pdf"
-        drive_link = await upload_to_drive(pdf_bytes, filename)
-        log.info(f"[{invoice_number}] Drive link: {drive_link}")
+        with open(pdf_path, "wb") as f:
+            f.write(pdf_bytes)
+        log.info(f"[{invoice_number}] PDF saved: {pdf_path}")
     except Exception as exc:
-        log.warning(f"Drive upload failed ({exc}), continuing without link")
-        drive_link = None
+        log.error(f"PDF save failed: {exc}")
+        pdf_path = None
 
     # ── Step 3: Draft email ───────────────────────────────────
+    emit_step_start("email_draft", "Draft Email", client_email)
     log.info(f"[{invoice_number}] Drafting email...")
     try:
-        email_params = {
-            **params,
-            "client_email": client_email,
-            "amount": total,
-            "invoice_number": invoice_number,
-        }
-        email = draft_email("invoice", email_params, drive_link)
+        email_params = {**params, "client_email": client_email, "amount": total, "invoice_number": invoice_number}
+        email = draft_email("invoice", email_params)
     except Exception as exc:
         log.error(f"Email draft failed: {exc}", exc_info=True)
         return PipelineResult(success=False, message=_err(lang), error=f"Email error: {exc}")
 
-    # ── Step 4: Send via Gmail API ────────────────────────────
-    log.info(f"[{invoice_number}] Sending email via Gmail API to {email.to}...")
-    gmail_result = await send_email(
-        to=email.to,
+    emit_step_done("email_draft", "Draft Email", email.subject)
+
+    # ── Step 4: Send via sendmail_skill ───────────────────────
+    emit_step_start("email_send", "Send Email", client_email)
+    log.info(f"[{invoice_number}] Sending email to {client_email} via sendmail_skill...")
+    sent = await _send_via_sendmail_skill(
+        to=client_email,
         subject=email.subject,
         body=email.body,
-        pdf_bytes=pdf_bytes,
-        pdf_filename=filename,
+        pdf_path=pdf_path,
     )
 
-    # ── Step 5: Build result message ──────────────────────────
+    emit_step_done("email_send", "Send Email", "sent" if sent else "failed")
+    emit_email_sent(client_email, email.subject, sent)
+    emit_invoice(invoice_number, format_amount(total, "EUR", lang), data.client_name)
+
+    # ── Step 5: Build result ──────────────────────────────────
     tmpl = SUCCESS_MESSAGES["send_invoice"].get(lang, SUCCESS_MESSAGES["send_invoice"]["en"])
     message = tmpl.format(
         invoice_number=invoice_number,
         amount=format_amount(total, "EUR", lang),
         client_name=data.client_name,
     )
-    if not gmail_result.get("success"):
-        suffix = {"lv": " E-pasts ir rindā.", "ru": " Письмо в очереди.", "en": " Email sending failed — check Gmail auth."}
+    if not sent:
+        suffix = {"lv": " E-pasts nav nosūtīts.", "ru": " Письмо не отправлено.", "en": " Email could not be sent — check Chrome is open."}
         message += suffix.get(lang, suffix["en"])
-        log.error(f"Gmail send failed: {gmail_result.get('error')}")
-
-    # ── Step 6: Telegram notification ─────────────────────────
-    await notify_task_complete(
-        action="send_invoice",
-        client_name=p.client_name,
-        client_email=client_email,
-        invoice_number=invoice_number,
-        drive_link=drive_link,
-        amount=total,
-        success=gmail_result.get("success", False),
-    )
 
     return PipelineResult(
-        success=gmail_result.get("success", False),
+        success=sent,
         message=message,
         invoice_number=invoice_number,
-        drive_link=drive_link,
+        drive_link=None,
     )
 
 
 async def handle_send_reminder(params: dict) -> PipelineResult:
-    """Draft and send a reminder email via Gmail. No PDF."""
     lang = params.get("language", "en")
     try:
         SendReminderParams(**params)
     except Exception as exc:
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
-
     return await _simple_pipeline("reminder", "send_reminder", params, lang)
 
 
@@ -217,7 +278,6 @@ async def handle_follow_up(params: dict) -> PipelineResult:
         FollowUpParams(**params)
     except Exception as exc:
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
-
     return await _simple_pipeline("follow_up", "follow_up", params, lang)
 
 
@@ -227,26 +287,19 @@ async def handle_request_documents(params: dict) -> PipelineResult:
         RequestDocumentsParams(**params)
     except Exception as exc:
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
-
     return await _simple_pipeline("request_documents", "request_documents", params, lang)
 
 
-# ── Shared simple pipeline (no PDF) ──────────────────────────
+# ── Simple pipeline (no PDF) ──────────────────────────────────
 
-async def _simple_pipeline(
-    email_action: str,
-    tool_name: str,
-    params: dict,
-    lang: str,
-) -> PipelineResult:
+async def _simple_pipeline(email_action: str, tool_name: str, params: dict, lang: str) -> PipelineResult:
     try:
         email = draft_email(email_action, params)
     except Exception as exc:
         log.error(f"Email draft failed: {exc}", exc_info=True)
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
 
-    # Send via Gmail API
-    gmail_result = await send_email(
+    sent = await _send_via_sendmail_skill(
         to=email.to,
         subject=email.subject,
         body=email.body,
@@ -254,18 +307,10 @@ async def _simple_pipeline(
 
     tmpl = SUCCESS_MESSAGES.get(tool_name, {}).get(lang, f"Done. Email sent to {params.get('client_name','client')}.")
     message = tmpl.format(client_name=params.get("client_name", "client"))
-    if not gmail_result.get("success"):
-        message += f" (Gmail error: {gmail_result.get('error', 'unknown')})"
+    if not sent:
+        message += " (email sending failed)"
 
-    # Telegram notification
-    await notify_task_complete(
-        action=tool_name,
-        client_name=params.get("client_name", ""),
-        client_email=params.get("client_email", ""),
-        success=gmail_result.get("success", False),
-    )
-
-    return PipelineResult(success=gmail_result.get("success", False), message=message)
+    return PipelineResult(success=sent, message=message)
 
 
 def _err(lang: str) -> str:

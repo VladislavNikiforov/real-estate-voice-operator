@@ -142,3 +142,39 @@ async def list_services() -> list[dict]:
         "property": "Status",
         "select": {"equals": "Aktīvs"},
     })
+
+
+async def create_client(name: str, email: str) -> dict:
+    """Create a new client in the Notion Clients database.
+
+    Returns the created client row or error dict.
+    """
+    if not NOTION_TOKEN or not NOTION_CLIENTS_DB:
+        log.warning("Notion not configured — cannot create client")
+        return {"error": "Notion not configured"}
+
+    payload = {
+        "parent": {"database_id": NOTION_CLIENTS_DB},
+        "properties": {
+            "Nosaukums": {
+                "title": [{"text": {"content": name}}]
+            },
+            "E-pasts": {
+                "email": email
+            },
+        },
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{_NOTION_API}/pages",
+                headers=_HEADERS,
+                json=payload,
+            )
+            resp.raise_for_status()
+            log.info(f"Created Notion client: {name} <{email}>")
+            return {"name": name, "email": email, "created": True}
+    except Exception as exc:
+        log.error(f"Failed to create Notion client: {exc}")
+        return {"error": str(exc), "name": name, "email": email}

@@ -7,7 +7,9 @@ from typing import Any
 
 from notion.client import lookup_client as notion_lookup_client
 from notion.client import lookup_service as notion_lookup_service
+from notion.client import create_client as notion_create_client
 from llm.orchestrator import handle_send_invoice
+from dashboard.events import emit_notion_update
 
 log = logging.getLogger(__name__)
 
@@ -32,9 +34,12 @@ async def _handle_lookup_client(input_data: dict) -> dict:
 
     result = await notion_lookup_client(name)
     if not result:
-        return {"error": f"No client found matching '{name}'"}
+        emit_notion_update("not_found", name)
+        return {"found": False, "message": f"No client found matching '{name}'"}
 
+    emit_notion_update("found", result.get("Nosaukums", name))
     return {
+        "found": True,
         "name": result.get("Nosaukums", ""),
         "reg_nr": result.get("Reģ. nr.", ""),
         "vat_nr": result.get("PVN nr.", ""),
@@ -48,6 +53,19 @@ async def _handle_lookup_client(input_data: dict) -> dict:
     }
 
 
+async def _handle_create_client(input_data: dict) -> dict:
+    """Add a new client to Notion."""
+    name = input_data.get("name", "")
+    email = input_data.get("email", "")
+    if not name or not email:
+        return {"error": "name and email are required"}
+
+    result = await notion_create_client(name, email)
+    if not result.get("error"):
+        emit_notion_update("created", name, email)
+    return result
+
+
 async def _handle_lookup_service(input_data: dict) -> dict:
     name = input_data.get("name", "")
     if not name:
@@ -55,9 +73,10 @@ async def _handle_lookup_service(input_data: dict) -> dict:
 
     result = await notion_lookup_service(name)
     if not result:
-        return {"error": f"No service found matching '{name}'"}
+        return {"found": False, "message": f"No service found matching '{name}'"}
 
     return {
+        "found": True,
         "name": result.get("Pakalpojums", ""),
         "description": result.get("Apraksts", ""),
         "unit": result.get("Mērvienība", ""),
@@ -68,28 +87,30 @@ async def _handle_lookup_service(input_data: dict) -> dict:
 
 
 async def _handle_create_invoice(input_data: dict) -> dict:
-    """Run the full invoice pipeline: PDF → Drive → Email."""
+    """Run the full invoice pipeline: PDF → save locally → sendmail_skill."""
     params = {
-        "client_name": input_data.get("client_name", ""),
+        "client_name":  input_data.get("client_name", ""),
+        "client_email": input_data.get("client_email", ""),
+        "amount":       input_data.get("amount", 0),
         "service_name": input_data.get("service_name", ""),
-        "quantity": input_data.get("quantity", 1),
-        "language": input_data.get("language", "lv"),
-        "notes": input_data.get("notes", ""),
+        "quantity":     input_data.get("quantity", 1),
+        "language":     input_data.get("language", "en"),
+        "notes":        input_data.get("notes", ""),
     }
 
     result = await handle_send_invoice(params)
 
     return {
-        "success": result.success,
+        "success":        result.success,
         "invoice_number": result.invoice_number,
-        "message": result.message,
-        "drive_link": result.drive_link,
-        "error": result.error,
+        "message":        result.message,
+        "error":          result.error,
     }
 
 
 _TOOLS = {
-    "lookup_client": _handle_lookup_client,
+    "lookup_client":  _handle_lookup_client,
+    "create_client":  _handle_create_client,
     "lookup_service": _handle_lookup_service,
     "create_invoice": _handle_create_invoice,
 }

@@ -20,25 +20,28 @@ def _warn_if_missing(key: str, hint: str = "") -> None:
 
 
 # ── Validate on import ────────────────────────────────────────
-_warn_if_missing("GDRIVE_CREDENTIALS_PATH", "Google Drive upload will save files locally")
-_warn_if_missing("GDRIVE_FOLDER_ID", "Google Drive upload will save files locally")
-_warn_if_missing("COMPANY_NAME", "using default company name")
-_warn_if_missing("NOTION_TOKEN", "Notion client/service lookup disabled")
-_warn_if_missing("ANTHROPIC_API_KEY", "Claude brain disabled — /api/chat won't work")
+_warn_if_missing("ANTHROPIC_API_KEY", "Claude brain disabled")
+_warn_if_missing("NOTION_TOKEN", "Notion client lookup disabled")
+_warn_if_missing("OPENCLAW_URL", "falling back to http://localhost:8888")
 
-# ── Exported config ───────────────────────────────────────────
-PORT = int(_get("PORT", "8000"))
+# ── Server ────────────────────────────────────────────────────
+PORT      = int(_get("PORT", "8000"))
 LOG_LEVEL = _get("LOG_LEVEL", "DEBUG")
 
-GDRIVE_CREDENTIALS_PATH = _get("GDRIVE_CREDENTIALS_PATH", "")
-GDRIVE_FOLDER_ID = _get("GDRIVE_FOLDER_ID", "")
+# ── Claude API ────────────────────────────────────────────────
+ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY", "")
+CLAUDE_MODEL      = _get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
-# ── Notion (Company OS) ─────────────────────────────────────
-NOTION_TOKEN      = _get("NOTION_TOKEN", "")
-NOTION_CLIENTS_DB = _get("NOTION_CLIENTS_DB", "")
+# ── Notion ────────────────────────────────────────────────────
+NOTION_TOKEN       = _get("NOTION_TOKEN", "")
+NOTION_CLIENTS_DB  = _get("NOTION_CLIENTS_DB", "")
 NOTION_SERVICES_DB = _get("NOTION_SERVICES_DB", "")
 
-# ── Company info (seller on invoices) ────────────────────────
+# ── ElevenLabs ────────────────────────────────────────────────
+ELEVENLABS_WEBHOOK_SECRET = _get("ELEVENLABS_WEBHOOK_SECRET", "")
+ELEVENLABS_AGENT_ID       = _get("ELEVENLABS_AGENT_ID", "")
+
+# ── Company info ──────────────────────────────────────────────
 COMPANY_NAME    = _get("COMPANY_NAME",    'SIA "TEIKUMS JT"')
 COMPANY_REG_NR  = _get("COMPANY_REG_NR",  "40203653629")
 COMPANY_VAT_NR  = _get("COMPANY_VAT_NR",  "LV40203653629")
@@ -48,19 +51,24 @@ COMPANY_EMAIL   = _get("COMPANY_EMAIL",   "info@teikums.lv")
 COMPANY_BANK    = _get("COMPANY_BANK",    "Swedbank")
 COMPANY_IBAN    = _get("COMPANY_IBAN",    "LV00HABA0000000000000")
 
-# ── Claude API ───────────────────────────────────────────────
-ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL      = _get("CLAUDE_MODEL", "claude-sonnet-4-5-20241022")
+# ── Google Drive (optional) ───────────────────────────────────
+GDRIVE_CREDENTIALS_PATH = _get("GDRIVE_CREDENTIALS_PATH", "")
+GDRIVE_FOLDER_ID        = _get("GDRIVE_FOLDER_ID", "")
+GDRIVE_CONFIGURED       = bool(GDRIVE_CREDENTIALS_PATH and GDRIVE_FOLDER_ID)
 
-# ── SMTP (direct email sending) ──────────────────────────────
+# ── SMTP (optional fallback) ──────────────────────────────────
 SMTP_HOST     = _get("SMTP_HOST", "")
 SMTP_PORT     = int(_get("SMTP_PORT", "587"))
 SMTP_USER     = _get("SMTP_USER", "")
 SMTP_PASSWORD = _get("SMTP_PASSWORD", "")
 SMTP_FROM     = _get("SMTP_FROM", "") or COMPANY_EMAIL
-
 SMTP_CONFIGURED = bool(SMTP_HOST and SMTP_USER and SMTP_PASSWORD)
-GDRIVE_CONFIGURED = bool(GDRIVE_CREDENTIALS_PATH and GDRIVE_FOLDER_ID)
 
-# Gmail OAuth2 — credentials stored in credentials/ directory
+# ── Gmail OAuth2 ──────────────────────────────────────────────
 GMAIL_CREDENTIALS_PATH = _get("GMAIL_CREDENTIALS_PATH", "credentials/gmail_credentials.json")
+
+# ── sendmail_skill (Chrome debug port) ───────────────────────
+CHROME_DEBUG_PORT = int(_get("CHROME_DEBUG_PORT", "9222"))
+
+# ── OpenClaw (legacy) ─────────────────────────────────────────
+OPENCLAW_URL = _get("OPENCLAW_URL", "http://localhost:8888")

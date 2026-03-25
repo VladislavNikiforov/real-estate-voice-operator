@@ -1,0 +1,82 @@
+[
+  {
+    "name": "send_invoice",
+    "description": "Generate an invoice PDF, upload to Google Drive, and send via email to the client.",
+    "type": "webhook",
+    "api": {
+      "method": "POST",
+      "url": "https://YOUR_NGROK_URL/api/elevenlabs/tool-call"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name":  { "type": "string",  "description": "Client full name" },
+        "client_email": { "type": "string",  "description": "Client email address" },
+        "property_id":  { "type": "string",  "description": "Property ID, e.g. apt-3" },
+        "amount":       { "type": "number",  "description": "Invoice amount in euros" },
+        "language":     { "type": "string",  "enum": ["lv", "ru", "en"], "description": "Language for documents and email" },
+        "notes":        { "type": "string",  "description": "Optional notes" }
+      },
+      "required": ["client_name", "client_email", "property_id", "amount", "language"]
+    }
+  },
+  {
+    "name": "send_reminder",
+    "description": "Send a payment reminder email to a client.",
+    "type": "webhook",
+    "api": {
+      "method": "POST",
+      "url": "https://YOUR_NGROK_URL/api/elevenlabs/tool-call"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name":  { "type": "string" },
+        "client_email": { "type": "string" },
+        "property_id":  { "type": "string" },
+        "amount":       { "type": "number" },
+        "language":     { "type": "string", "enum": ["lv", "ru", "en"] }
+      },
+      "required": ["client_name", "client_email", "language"]
+    }
+  },
+  {
+    "name": "follow_up",
+    "description": "Send a follow-up email after a property viewing.",
+    "type": "webhook",
+    "api": {
+      "method": "POST",
+      "url": "https://YOUR_NGROK_URL/api/elevenlabs/tool-call"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name":  { "type": "string" },
+        "client_email": { "type": "string" },
+        "property_id":  { "type": "string" },
+        "language":     { "type": "string", "enum": ["lv", "ru", "en"] },
+        "notes":        { "type": "string" }
+      },
+      "required": ["client_name", "client_email", "language"]
+    }
+  },
+  {
+    "name": "request_documents",
+    "description": "Send email requesting documents from client.",
+    "type": "webhook",
+    "api": {
+      "method": "POST",
+      "url": "https://YOUR_NGROK_URL/api/elevenlabs/tool-call"
+    },
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "client_name":       { "type": "string" },
+        "client_email":      { "type": "string" },
+        "documents_needed":  { "type": "string", "description": "What documents to request" },
+        "language":          { "type": "string", "enum": ["lv", "ru", "en"] }
+      },
+      "required": ["client_name", "client_email", "documents_needed", "language"]
+    }
+  }
+]
