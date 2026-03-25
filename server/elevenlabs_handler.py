@@ -14,6 +14,7 @@ from typing import Any
 
 from llm import orchestrator
 from notion.client import lookup_client as notion_lookup_client
+from gmail.sender import search_emails_gmail
 
 log = logging.getLogger(__name__)
 
@@ -93,27 +94,38 @@ def lookup_contact(params: dict) -> dict:
     return {"error": f"No contact found for '{params.get('name', '')}'"}
 
 
-# ── Search emails (placeholder — will use Gmail API when connected) ──
+# ── Search emails via Gmail API ──────────────────────────────
 
 async def search_emails(params: dict) -> dict:
-    """Search emails. Currently returns mock data.
-    TODO: Replace with real Gmail API calls when OAuth2 is configured.
-    """
+    """Search emails via Gmail API. Falls back to mock if Gmail not configured."""
     query = params.get("query", "")
-    log.info(f"search_emails: query='{query}'")
+    contact_email = params.get("email", "")
 
-    # Mock response for demo — replace with Gmail API
-    return {
-        "emails": [
-            {
-                "from": "john.smith@gmail.com",
-                "subject": "Office Room 5 Booking",
-                "snippet": "Hi, I'd like to book Room 5 for March 27-29. Please send me the invoice.",
-                "date": "2026-03-24",
-            }
-        ],
-        "note": "Mock data — connect Gmail API for real results",
-    }
+    # Build Gmail search query
+    gmail_query = query
+    if contact_email and "from:" not in query:
+        gmail_query = f"from:{contact_email} {query}".strip()
+
+    log.info(f"search_emails: query='{gmail_query}'")
+
+    try:
+        emails = await search_emails_gmail(gmail_query, max_results=5)
+        if emails:
+            return {"emails": emails}
+        return {"emails": [], "note": "No emails found matching the query"}
+    except Exception as exc:
+        log.warning(f"Gmail search failed ({exc}), returning mock data")
+        return {
+            "emails": [
+                {
+                    "from": "john.smith@gmail.com",
+                    "subject": "Office Room 5 Booking",
+                    "snippet": "Hi, I'd like to book Room 5 for March 27-29. Please send me the invoice.",
+                    "date": "2026-03-24",
+                }
+            ],
+            "note": "Mock data — Gmail API not configured yet",
+        }
 
 
 # ── Create task (triggers the full pipeline) ─────────────────

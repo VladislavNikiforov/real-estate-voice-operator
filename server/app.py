@@ -20,9 +20,9 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Real Estate Voice Operator server starting...")
-    from server.config import OPENCLAW_URL, GDRIVE_CONFIGURED
-    log.info(f"   OpenClaw URL : {OPENCLAW_URL}")
+    from server.config import GDRIVE_CONFIGURED
     log.info(f"   Google Drive : {'configured' if GDRIVE_CONFIGURED else 'local fallback'}")
+    log.info(f"   Email send   : Gmail API (OAuth2)")
     yield
     log.info("Server shutting down.")
 
@@ -31,8 +31,6 @@ app = FastAPI(title="RE Voice Operator", lifespan=lifespan)
 
 
 # ── ElevenLabs tool endpoints ─────────────────────────────────
-# ElevenLabs sends a flat JSON body with just the parameters.
-# Each tool gets its own URL configured in the ElevenLabs dashboard.
 
 @app.post("/api/tools/lookup-contact")
 async def tool_lookup_contact(request: Request):
@@ -114,24 +112,11 @@ async def chat_reset(request: Request):
     return JSONResponse({"status": "ok", "session_id": session_id})
 
 
-# ── Manual test endpoint (same as before) ─────────────────────
+# ── Manual test endpoint ──────────────────────────────────────
 
 @app.post("/api/test")
 async def test_endpoint(request: Request):
-    """Manual testing without ElevenLabs. Send a tool call directly.
-
-    Example body:
-        {
-          "tool": "send_invoice",
-          "params": {
-            "client_name": "John Smith",
-            "client_email": "john.smith@gmail.com",
-            "property_id": "room-5",
-            "amount": 240,
-            "language": "en"
-          }
-        }
-    """
+    """Manual testing without ElevenLabs. Send a tool call directly."""
     try:
         body = await request.json()
     except Exception:
@@ -147,7 +132,6 @@ async def test_endpoint(request: Request):
     elif tool in ("create_task", "create-task"):
         result = await create_task(params)
     else:
-        # Legacy: treat tool name as an action for create_task
         params["action"] = tool
         result = await create_task(params)
 
