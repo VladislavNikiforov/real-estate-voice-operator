@@ -193,4 +193,11 @@ The dashboard at `/dashboard` shows real-time pipeline execution during voice ca
 
 ## Team
 
-Built at hackathon by a team of 4.
+Built at BADideas hackathon by a team of 4:
+Sergei Goncharenko
+Vladislav Nikiforov
+Kaspars Kondratjuks
+Raghav Joshi
+
+
+
