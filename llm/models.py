@@ -57,15 +57,9 @@ class EmailDraft(BaseModel):
     language: str = "en"
 
 
-class OpenClawInstruction(BaseModel):
-    action: str = "send_email_gmail"
-    email: EmailDraft
-    prompt: str                  # Natural language prompt for Desktop Commander
-
-
 class PipelineResult(BaseModel):
     success: bool
-    message: str                 # Vapi speaks this back to the caller
+    message: str                 # Agent speaks this back to the caller
     invoice_number: Optional[str] = None
     drive_link: Optional[str] = None
     error: Optional[str] = None
