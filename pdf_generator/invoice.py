@@ -45,7 +45,11 @@ def _register_fonts() -> None:
         if p.exists():
             try:
                 pdfmetrics.registerFont(TTFont("DejaVuSans", str(p)))
-                pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(p)))
+                bold_path = p.parent / "DejaVuSans-Bold.ttf"
+                if bold_path.exists():
+                    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(bold_path)))
+                else:
+                    pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", str(p)))
                 _UNICODE_FONT = "DejaVuSans"
                 break
             except Exception:
@@ -76,7 +80,7 @@ def generate_invoice_pdf(data: InvoiceData) -> bytes:
     )
 
     font   = _UNICODE_FONT
-    font_b = _UNICODE_FONT
+    font_b = _UNICODE_FONT + "-Bold" if _UNICODE_FONT == "DejaVuSans" else _UNICODE_FONT
     lang   = data.language
 
     def style(size=10, bold=False, color=_DARK, align="LEFT"):
