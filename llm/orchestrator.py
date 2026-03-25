@@ -20,6 +20,7 @@ from pdf_generator.templates import format_amount, format_date
 from gdrive.uploader import upload_to_drive
 from email_drafter.drafter import draft_email
 from openclaw_prompt.generator import build_openclaw_instruction
+from telegram.bot import notify_task_complete
 
 log = logging.getLogger(__name__)
 
@@ -108,6 +109,17 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         suffix = {"lv": " E-pasts ir rindā.", "ru": " Письмо в очереди.", "en": " Email has been queued."}
         message += suffix.get(lang, " Email queued.")
 
+    # ── Step 7: Telegram notification ─────────────────────────
+    await notify_task_complete(
+        action="send_invoice",
+        client_name=p.client_name,
+        client_email=p.client_email,
+        invoice_number=invoice_number,
+        drive_link=drive_link,
+        amount=p.amount,
+        success=True,
+    )
+
     return PipelineResult(
         success=True,
         message=message,
@@ -168,6 +180,14 @@ async def _simple_pipeline(
     message = tmpl.format(client_name=params.get("client_name", "client"))
     if not oc_ok:
         message += " (queued)"
+
+    # Telegram notification
+    await notify_task_complete(
+        action=tool_name,
+        client_name=params.get("client_name", ""),
+        client_email=params.get("client_email", ""),
+        success=True,
+    )
 
     return PipelineResult(success=True, message=message)
 
