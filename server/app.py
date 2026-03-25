@@ -37,12 +37,33 @@ app = FastAPI(title="RE Voice Operator", lifespan=lifespan)
 
 @app.post("/api/elevenlabs/post-call")
 async def elevenlabs_post_call(request: Request):
-    """Receive ElevenLabs post-call transcript → Claude brain → pipeline."""
+    """Receive ElevenLabs webhook events → route by type.
+
+    ElevenLabs sends all events to this one URL:
+      - conversation_initiation_client_data  → call starting (real-time)
+      - post_call_transcription              → call ended, full transcript
+      - (any other type)                     → logged, acknowledged
+    """
     try:
         payload = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
+    event_type = payload.get("type", "")
+    log.info(f"ElevenLabs event type: {event_type!r}")
+
+    # ── Call just started — immediately light up the dashboard ──
+    if event_type in ("conversation_initiation_client_data", "call.initiated", "conversation.started"):
+        from dashboard.events import emit_call_start
+        conversation_id = (
+            payload.get("conversation_id")
+            or payload.get("data", {}).get("conversation_id", "live")
+        )
+        emit_call_start(conversation_id)
+        log.info(f"Call started: {conversation_id}")
+        return JSONResponse({"status": "ok", "event": "call_start"})
+
+    # ── Post-call transcript — run full pipeline ─────────────────
     result = await handle_post_call(payload)
     log.info(f"Post-call result: {result}")
     return JSONResponse(result)
@@ -115,9 +136,19 @@ async def test_transcript(request: Request):
 
 @app.post("/api/elevenlabs/twilio-voice")
 async def twilio_voice(request: Request):
-    """Twilio webhook — connects incoming call to ElevenLabs agent via stream."""
+    """Twilio webhook — fires the instant someone calls. Bridge to ElevenLabs + real-time dashboard."""
     from twilio.twiml.voice_response import VoiceResponse, Connect
     from server.config import ELEVENLABS_AGENT_ID
+    from dashboard.events import emit_call_start
+
+    # Parse Twilio form body to get call metadata
+    form = await request.form()
+    call_sid = form.get("CallSid", "twilio-live")
+    caller = form.get("From", "unknown")
+    log.info(f"Incoming call: {caller} | SID: {call_sid}")
+
+    # ── Immediately push "call active" to dashboard ───────────────
+    emit_call_start(call_sid)
 
     response = VoiceResponse()
     response.say("Connecting you to the real estate assistant.")
@@ -138,6 +169,15 @@ async def dashboard():
     if html_path.exists():
         return HTMLResponse(html_path.read_text(encoding="utf-8"))
     return JSONResponse({"error": "dashboard not found"}, status_code=404)
+
+
+# ── GET /api/dashboard/state  ────────────────────────────────
+
+@app.get("/api/dashboard/state")
+async def dashboard_state():
+    """Current stats + recent calls snapshot for dashboard initial load."""
+    from dashboard.events import get_state
+    return JSONResponse(get_state())
 
 
 # ── GET /api/events  ──────────────────────────────────────────

@@ -9,6 +9,7 @@ from notion.client import lookup_client as notion_lookup_client
 from notion.client import lookup_service as notion_lookup_service
 from notion.client import create_client as notion_create_client
 from llm.orchestrator import handle_send_invoice
+from dashboard.events import emit_notion_update
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +34,10 @@ async def _handle_lookup_client(input_data: dict) -> dict:
 
     result = await notion_lookup_client(name)
     if not result:
+        emit_notion_update("not_found", name)
         return {"found": False, "message": f"No client found matching '{name}'"}
 
+    emit_notion_update("found", result.get("Nosaukums", name))
     return {
         "found": True,
         "name": result.get("Nosaukums", ""),
@@ -58,6 +61,8 @@ async def _handle_create_client(input_data: dict) -> dict:
         return {"error": "name and email are required"}
 
     result = await notion_create_client(name, email)
+    if not result.get("error"):
+        emit_notion_update("created", name, email)
     return result
 
 

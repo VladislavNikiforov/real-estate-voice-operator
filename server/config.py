@@ -30,7 +30,7 @@ LOG_LEVEL = _get("LOG_LEVEL", "DEBUG")
 
 # ── Claude API ────────────────────────────────────────────────
 ANTHROPIC_API_KEY = _get("ANTHROPIC_API_KEY", "")
-CLAUDE_MODEL      = _get("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+CLAUDE_MODEL      = _get("CLAUDE_MODEL", "claude-sonnet-4-6")
 
 # ── Notion ────────────────────────────────────────────────────
 NOTION_TOKEN       = _get("NOTION_TOKEN", "")

@@ -1,374 +1,483 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Operator — Live Pipeline</title>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Sonic Ledger</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0f172a;--card:#1e293b;--card2:#162032;--border:#1e3a5a;
+  --green:#10b981;--blue:#3b82f6;--red:#ef4444;--yellow:#f59e0b;
+  --text:#e2e8f0;--muted:#64748b;--muted2:#334155;
+}
+body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
 
-  body {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    background: #0a0a1a;
-    color: #e0e0e0;
-    min-height: 100vh;
-    padding: 2rem;
-  }
+/* ── Topbar ── */
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:0 24px;height:52px;background:#0d1526;border-bottom:1px solid var(--border);flex-shrink:0}
+.logo{font-size:14px;font-weight:700;letter-spacing:1.5px;color:#fff}
+.top-nav{display:flex;gap:0}
+.top-nav a{padding:0 20px;height:52px;display:flex;align-items:center;font-size:13px;color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;cursor:pointer}
+.top-nav a.active{color:#fff;border-bottom-color:var(--green)}
+.top-right{display:flex;align-items:center;gap:16px}
+.system-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green);background:#0d2818;padding:4px 10px;border-radius:20px;border:1px solid #1a4a2a}
+.system-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 6px var(--green);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.icon-btn{width:32px;height:32px;border-radius:8px;background:var(--card);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:14px}
 
-  .header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 2rem;
-    padding-bottom: 1rem;
-    border-bottom: 1px solid #1a1a3e;
-  }
+/* ── Layout ── */
+.layout{display:grid;grid-template-columns:220px 1fr 420px;flex:1;overflow:hidden}
 
-  .header h1 {
-    font-size: 1.5rem;
-    font-weight: 600;
-    color: #fff;
-  }
+/* ── Sidebar ── */
+.sidebar{background:#0d1526;border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0}
+.sidebar-header{padding:0 16px 20px;border-bottom:1px solid var(--border)}
+.sidebar-header .sh-title{font-size:11px;font-weight:700;color:var(--green);letter-spacing:.8px;text-transform:uppercase}
+.sidebar-header .sh-sub{font-size:10px;color:var(--muted);margin-top:3px}
+.sidebar-nav{flex:1;padding:16px 10px}
+.nav-item{display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--muted);margin-bottom:4px;transition:all .15s}
+.nav-item:hover{background:var(--card);color:var(--text)}
+.nav-item.active{background:#0d2818;color:var(--green)}
+.nav-item .ni{width:18px;text-align:center;font-size:14px}
+.new-entry-btn{margin:0 12px 16px;padding:12px;background:var(--blue);border:none;border-radius:8px;color:#fff;font-size:13px;font-weight:600;cursor:pointer;width:calc(100% - 24px);transition:opacity .2s}
+.new-entry-btn:hover{opacity:.85}
 
-  .header h1 span { color: #e63946; }
+/* ── Center ── */
+.center{display:flex;flex-direction:column;overflow:hidden;background:var(--bg)}
+.call-card{background:var(--card2);border-bottom:1px solid var(--border);padding:20px 24px;flex-shrink:0}
+.call-top{display:flex;align-items:flex-start;justify-content:space-between}
+.call-label{font-size:10px;text-transform:uppercase;letter-spacing:1px;color:var(--muted);margin-bottom:8px}
+.call-number{font-size:32px;font-weight:700;line-height:1;color:#fff}
+.call-right{text-align:right}
+.connected-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green);justify-content:flex-end;margin-bottom:8px}
+.connected-badge::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;display:inline-block}
+.timer{font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;color:var(--muted)}
+.waveform{display:flex;align-items:center;gap:3px;height:36px;margin-top:12px}
+.waveform .bar{width:4px;border-radius:2px;background:var(--green);animation:wave 1.2s ease-in-out infinite}
+.waveform .bar:nth-child(1){height:8px;animation-delay:0s}
+.waveform .bar:nth-child(2){height:18px;animation-delay:.1s}
+.waveform .bar:nth-child(3){height:28px;animation-delay:.2s}
+.waveform .bar:nth-child(4){height:36px;animation-delay:.3s}
+.waveform .bar:nth-child(5){height:24px;animation-delay:.4s}
+.waveform .bar:nth-child(6){height:14px;animation-delay:.5s}
+.waveform .bar:nth-child(7){height:8px;animation-delay:.6s}
+.waveform.idle .bar{animation:none;height:4px;background:var(--muted2)}
+@keyframes wave{0%,100%{transform:scaleY(.4)}50%{transform:scaleY(1)}}
+.transcript-area{flex:1;overflow-y:auto;padding:20px 24px}
+.transcript-line{display:flex;gap:12px;margin-bottom:14px;font-size:12px;line-height:1.5}
+.tl-time{color:var(--muted);font-variant-numeric:tabular-nums;flex-shrink:0;width:50px}
+.tl-role{font-weight:700;flex-shrink:0;width:74px}
+.tl-role.op{color:var(--green)}
+.tl-role.cl{color:var(--blue)}
+.tl-role.sys{color:var(--muted);font-style:italic;font-weight:400}
+.tl-text{color:var(--text)}
+.tl-text.sys{color:var(--muted);font-style:italic}
 
-  .status-dot {
-    width: 10px; height: 10px;
-    border-radius: 50%;
-    display: inline-block;
-    margin-right: 8px;
-    background: #666;
-  }
-  .status-dot.connected { background: #22c55e; animation: pulse 2s infinite; }
-  .status-dot.disconnected { background: #e63946; }
+/* ── Right panel ── */
+.right{background:#0d1526;border-left:1px solid var(--border);overflow-y:auto;display:flex;flex-direction:column}
+.rp-header{padding:20px 24px 16px;border-bottom:1px solid var(--border);flex-shrink:0}
+.rp-title{font-size:18px;font-weight:700}
+.rp-sub{font-size:12px;color:var(--muted);margin-top:4px}
+.pipeline{padding:20px 24px;flex:1}
+.pipe-step{display:flex;gap:16px;margin-bottom:0;position:relative}
+.pipe-step:not(:last-child)::after{content:'';position:absolute;left:22px;top:48px;width:2px;bottom:-16px;background:var(--border)}
+.pipe-step.done::after{background:var(--green)22}
+.step-icon-wrap{width:44px;height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;background:var(--card);border:1px solid var(--border);position:relative;z-index:1}
+.pipe-step.done .step-icon-wrap{background:#0d2818;border-color:var(--green)44}
+.pipe-step.active .step-icon-wrap{background:#0d1f3a;border-color:var(--blue);box-shadow:0 0 12px var(--blue)33;animation:bgpulse 1.5s ease-in-out infinite}
+.pipe-step.waiting .step-icon-wrap{background:#1a1500;border-color:var(--yellow)66}
+.pipe-step.pending .step-icon-wrap{opacity:.35}
+@keyframes bgpulse{0%,100%{box-shadow:0 0 8px var(--blue)33}50%{box-shadow:0 0 16px var(--blue)66}}
+.step-body{flex:1;padding-bottom:20px}
+.step-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px}
+.step-name{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px}
+.pipe-step.done .step-name{color:var(--green)}
+.pipe-step.active .step-name{color:var(--blue)}
+.pipe-step.waiting .step-name{color:var(--yellow)}
+.pipe-step.pending .step-name{color:var(--muted)}
+.step-time{font-size:10px;color:var(--muted)}
+.step-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:14px}
+.pipe-step.done .step-card{border-color:var(--green)22}
+.pipe-step.active .step-card{border-color:var(--blue)44}
+.pipe-step.waiting .step-card{border-color:var(--yellow)44}
+.pipe-step.pending .step-card{opacity:.4}
+.sc-main{font-size:14px;font-weight:600;margin-bottom:4px}
+.sc-sub{font-size:11px;color:var(--muted)}
+.sc-row{display:flex;justify-content:space-between;align-items:center}
+.sc-amount{font-size:22px;font-weight:700;color:#fff}
+.sc-label{font-size:11px;color:var(--muted)}
+.sc-rate{font-size:13px;font-weight:600;color:var(--green)}
+.approve-row{display:flex;gap:8px;margin-top:14px}
+.btn-approve{flex:1;padding:10px;background:var(--text);color:var(--bg);border:none;border-radius:6px;font-size:12px;font-weight:700;letter-spacing:.8px;cursor:pointer}
+.btn-edit{flex:1;padding:10px;background:var(--card2);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:700;letter-spacing:.8px;cursor:pointer}
+.processing-tag{font-size:10px;color:var(--yellow);background:#1a150022;padding:2px 8px;border-radius:4px;border:1px solid var(--yellow)33}
+.sc-transcript{font-size:11px;color:var(--muted);font-style:italic;line-height:1.5}
+.sc-transcript em{color:var(--text);font-style:normal}
 
-  @keyframes pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
-  }
+/* ── Bottom bar ── */
+.bottombar{height:44px;background:#0a1020;border-top:1px solid var(--border);display:flex;align-items:center;padding:0 24px;gap:32px;flex-shrink:0;font-size:11px;color:var(--muted)}
+.bb-item{display:flex;align-items:center;gap:6px}
+.bb-item .val{color:var(--text);font-weight:600}
+.bb-item .ico{font-size:12px}
+.bb-sep{width:1px;height:20px;background:var(--border)}
+.bb-right{margin-left:auto;display:flex;gap:24px}
+.bb-active{color:var(--green)}
 
-  .grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.5rem;
-    max-width: 1400px;
-  }
-
-  .panel {
-    background: #111128;
-    border: 1px solid #1a1a3e;
-    border-radius: 12px;
-    padding: 1.5rem;
-  }
-
-  .panel-title {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: #e63946;
-    margin-bottom: 1rem;
-  }
-
-  /* Transcript */
-  #transcript-area {
-    min-height: 80px;
-    font-size: 1.2rem;
-    color: #fff;
-    line-height: 1.6;
-  }
-  #transcript-area .user { color: #60a5fa; }
-  #transcript-area .assistant { color: #a78bfa; }
-  #transcript-area .label { color: #666; font-size: 0.8rem; margin-right: 0.5rem; }
-
-  /* Pipeline steps */
-  .step {
-    display: flex;
-    align-items: flex-start;
-    padding: 0.6rem 0;
-    border-bottom: 1px solid #1a1a2e;
-    gap: 0.75rem;
-  }
-  .step:last-child { border-bottom: none; }
-
-  .step-icon {
-    width: 28px; height: 28px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.8rem;
-    flex-shrink: 0;
-    margin-top: 2px;
-  }
-  .step-icon.pending { background: #1a1a3e; color: #444; }
-  .step-icon.running { background: #1a1a3e; color: #facc15; animation: spin 1s linear infinite; }
-  .step-icon.done { background: #166534; color: #22c55e; }
-  .step-icon.waiting { background: #78350f; color: #facc15; }
-  .step-icon.error { background: #7f1d1d; color: #ef4444; }
-
-  @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  .step-body { flex: 1; }
-  .step-label { font-size: 0.9rem; color: #e0e0e0; }
-  .step-detail { font-size: 0.75rem; color: #888; margin-top: 2px; }
-  .step-time { font-size: 0.7rem; color: #555; white-space: nowrap; margin-top: 4px; }
-
-  /* Invoice preview */
-  #invoice-preview {
-    display: none;
-    background: #0f0f24;
-    border: 1px solid #e63946;
-    border-radius: 8px;
-    padding: 1.2rem;
-    margin-top: 1rem;
-  }
-  #invoice-preview.visible { display: block; animation: slideIn 0.3s ease-out; }
-
-  @keyframes slideIn {
-    from { opacity: 0; transform: translateY(10px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  .invoice-row {
-    display: flex;
-    justify-content: space-between;
-    padding: 0.3rem 0;
-  }
-  .invoice-row .label { color: #888; }
-  .invoice-row .value { color: #fff; font-weight: 600; }
-  .invoice-row .value.big { font-size: 1.3rem; color: #22c55e; }
-
-  /* Response */
-  #response-area {
-    min-height: 60px;
-    font-size: 1rem;
-    color: #a78bfa;
-    line-height: 1.5;
-    font-style: italic;
-  }
-
-  .full-width { grid-column: 1 / -1; }
-
-  /* Connection banner */
-  .conn-banner {
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    background: #e63946;
-    color: #fff;
-    text-align: center;
-    padding: 6px;
-    font-size: 0.8rem;
-    display: none;
-    z-index: 100;
-  }
-  .conn-banner.show { display: block; }
+/* ── Scrollbar ── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:4px}
 </style>
 </head>
 <body>
 
-<div class="conn-banner" id="conn-banner">Reconnecting to server...</div>
-
-<div class="header">
-  <h1><span>OPERATOR</span> — Live Pipeline</h1>
-  <div>
-    <span class="status-dot" id="status-dot"></span>
-    <span id="status-text" style="font-size: 0.8rem; color: #666;">connecting...</span>
+<!-- Topbar -->
+<div class="topbar">
+  <div class="logo">SONIC LEDGER</div>
+  <nav class="top-nav">
+    <a class="active">Live Stream</a>
+    <a>Analytics</a>
+    <a>Invoices</a>
+  </nav>
+  <div class="top-right">
+    <div class="system-badge">SYSTEM ONLINE</div>
+    <div class="icon-btn">🔔</div>
+    <div class="icon-btn">⚙️</div>
+    <div class="icon-btn">👤</div>
   </div>
 </div>
 
-<div class="grid">
-  <!-- Transcript -->
-  <div class="panel full-width">
-    <div class="panel-title">Conversation</div>
-    <div id="transcript-area">
-      <span style="color: #444;">Waiting for input...</span>
-    </div>
-  </div>
+<!-- Layout -->
+<div class="layout">
 
-  <!-- Pipeline Steps -->
-  <div class="panel">
-    <div class="panel-title">Pipeline Steps</div>
-    <div id="steps-area">
-      <!-- Steps are added dynamically -->
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="sh-title">THE OBSIDIAN CONDUCTOR</div>
+      <div class="sh-sub">Live Voice Pipeline</div>
     </div>
-  </div>
+    <nav class="sidebar-nav">
+      <div class="nav-item active"><span class="ni">🎙️</span>Live Stream</div>
+      <div class="nav-item"><span class="ni">📊</span>Analytics</div>
+      <div class="nav-item"><span class="ni">🧾</span>Invoices</div>
+      <div class="nav-item"><span class="ni">⚙️</span>Settings</div>
+    </nav>
+    <button class="new-entry-btn">New Manual Entry</button>
+  </aside>
 
-  <!-- Right column: Invoice + Response -->
-  <div>
-    <div class="panel">
-      <div class="panel-title">Operator Response</div>
-      <div id="response-area">
-        <span style="color: #444;">Waiting...</span>
+  <!-- Center -->
+  <main class="center">
+    <div class="call-card">
+      <div class="call-top">
+        <div>
+          <div class="call-label">Active Call</div>
+          <div class="call-number" id="call-number">—</div>
+        </div>
+        <div class="call-right">
+          <div class="connected-badge" id="conn-badge">CONNECTED</div>
+          <div class="timer" id="timer">00:00:00</div>
+        </div>
+      </div>
+      <div class="waveform idle" id="waveform">
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <div class="bar"></div><div class="bar"></div><div class="bar"></div>
+        <div class="bar"></div>
       </div>
     </div>
+    <div class="transcript-area" id="transcript"></div>
+  </main>
 
-    <div id="invoice-preview">
-      <div class="panel-title" style="color: #e63946;">Invoice Generated</div>
-      <div class="invoice-row">
-        <span class="label">Number</span>
-        <span class="value" id="inv-number">—</span>
-      </div>
-      <div class="invoice-row">
-        <span class="label">Client</span>
-        <span class="value" id="inv-client">—</span>
-      </div>
-      <div class="invoice-row">
-        <span class="label">Total</span>
-        <span class="value big" id="inv-total">—</span>
-      </div>
-      <div class="invoice-row" id="inv-link-row" style="display:none;">
-        <span class="label">PDF</span>
-        <a class="value" id="inv-link" href="#" target="_blank" style="color: #60a5fa; text-decoration: none;">Open</a>
-      </div>
+  <!-- Right panel -->
+  <aside class="right">
+    <div class="rp-header">
+      <div class="rp-title">Invoice Pipeline</div>
+      <div class="rp-sub" id="rp-sub">Waiting for call...</div>
     </div>
+    <div class="pipeline" id="pipeline">
+
+      <div class="pipe-step pending" id="ps-call">
+        <div class="step-icon-wrap">📞</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Incoming Call</div><div class="step-time" id="pt-call">—</div></div>
+          <div class="step-card"><div class="sc-main" id="pc-number">—</div><div class="sc-sub" id="pc-duration">Waiting...</div></div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-voice">
+        <div class="step-icon-wrap">🎤</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Voice Recognition</div><div class="step-time" id="pt-voice">—</div></div>
+          <div class="step-card"><div class="sc-transcript" id="pc-transcript">Awaiting speech...</div></div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-client">
+        <div class="step-icon-wrap">🔍</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Client Lookup</div><div class="step-time" id="pt-client">—</div></div>
+          <div class="step-card"><div class="sc-main" id="pc-client">—</div><div class="sc-sub" id="pc-client-sub">Not started</div></div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-service">
+        <div class="step-icon-wrap">📋</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Service Lookup</div><div class="step-time" id="pt-service">—</div></div>
+          <div class="step-card"><div class="sc-row"><div class="sc-main" id="pc-service">—</div><div class="sc-rate" id="pc-rate"></div></div></div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-confirm">
+        <div class="step-icon-wrap">✅</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Awaiting Confirmation</div><div class="processing-tag" id="pt-confirm" style="display:none">PROCESSING...</div></div>
+          <div class="step-card">
+            <div class="sc-row"><div class="sc-label">Total</div><div class="sc-label">Subtotal</div></div>
+            <div class="sc-row" style="margin-top:6px"><div id="pc-duration2" style="font-size:13px;color:var(--muted)">—</div><div class="sc-amount" id="pc-total">—</div></div>
+            <div class="approve-row" id="approve-row" style="display:none">
+              <button class="btn-approve" onclick="approvePipeline()">APPROVE</button>
+              <button class="btn-edit">EDIT</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-pdf">
+        <div class="step-icon-wrap">📄</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">PDF Generation</div><div class="step-time" id="pt-pdf">—</div></div>
+          <div class="step-card"><div class="sc-sub" id="pc-pdf">Pending</div></div>
+        </div>
+      </div>
+
+      <div class="pipe-step pending" id="ps-email">
+        <div class="step-icon-wrap">📧</div>
+        <div class="step-body">
+          <div class="step-header"><div class="step-name">Email Delivery</div><div class="step-time" id="pt-email">—</div></div>
+          <div class="step-card"><div class="sc-sub" id="pc-email">Pending</div></div>
+        </div>
+      </div>
+
+    </div>
+  </aside>
+
+</div>
+
+<!-- Bottombar -->
+<div class="bottombar">
+  <div class="bb-item"><span class="ico">🧾</span>TOTAL INVOICES TODAY <span class="val" id="bb-invoices">0 Units</span></div>
+  <div class="bb-sep"></div>
+  <div class="bb-item"><span class="ico">📈</span>TOTAL AMOUNT <span class="val" id="bb-amount">0.00 EUR</span></div>
+  <div class="bb-sep"></div>
+  <div class="bb-item">LAST INVOICE: <span class="val" id="bb-last">—</span></div>
+  <div class="bb-right">
+    <div class="bb-item bb-active">📞 ACTIVE CALLS: <span class="val" id="bb-active">0</span></div>
+    <div class="bb-sep"></div>
+    <div class="bb-item">✅ COMPLETED: <span class="val" id="bb-completed">0</span></div>
   </div>
 </div>
 
 <script>
-const stepsArea = document.getElementById('steps-area');
-const transcriptArea = document.getElementById('transcript-area');
-const responseArea = document.getElementById('response-area');
-const statusDot = document.getElementById('status-dot');
-const statusText = document.getElementById('status-text');
-const connBanner = document.getElementById('conn-banner');
-const invoicePreview = document.getElementById('invoice-preview');
+let timerInterval = null;
+let timerSecs = 0;
+let totalAmount = 0;
+let completedCalls = 0;
+let activeCalls = 0;
+let currentInvoiceNumber = '';
 
-let firstMessage = true;
-let stepElements = {};
+function nowTime(){return new Date().toLocaleTimeString('en-GB',{hour12:false})}
 
-function setConnected(connected) {
-  statusDot.className = 'status-dot ' + (connected ? 'connected' : 'disconnected');
-  statusText.textContent = connected ? 'live' : 'disconnected';
-  connBanner.className = 'conn-banner' + (connected ? '' : ' show');
+function setStep(id,status){
+  const el=document.getElementById('ps-'+id);
+  if(el) el.className='pipe-step '+status;
+}
+function setText(id,val){
+  const el=document.getElementById(id);
+  if(el) el.textContent=val;
 }
 
-function addStep(id, label, status, detail, timeMs) {
-  let el = stepElements[id];
-  if (!el) {
-    el = document.createElement('div');
-    el.className = 'step';
-    el.innerHTML = `
-      <div class="step-icon pending" id="icon-${id}">&#9675;</div>
-      <div class="step-body">
-        <div class="step-label" id="label-${id}"></div>
-        <div class="step-detail" id="detail-${id}"></div>
-      </div>
-      <div class="step-time" id="time-${id}"></div>
-    `;
-    stepsArea.appendChild(el);
-    stepElements[id] = el;
+function startTimer(){
+  timerSecs=0;
+  if(timerInterval) clearInterval(timerInterval);
+  timerInterval=setInterval(()=>{
+    timerSecs++;
+    const h=Math.floor(timerSecs/3600).toString().padStart(2,'0');
+    const m=Math.floor((timerSecs%3600)/60).toString().padStart(2,'0');
+    const s=(timerSecs%60).toString().padStart(2,'0');
+    document.getElementById('timer').textContent=h+':'+m+':'+s;
+  },1000);
+}
+
+function stopTimer(){
+  if(timerInterval){clearInterval(timerInterval);timerInterval=null;}
+}
+
+function addTranscript(role, text, time){
+  const p=document.getElementById('transcript');
+  const d=document.createElement('div');
+  d.className='transcript-line';
+  const isOp=role==='AGENT'||role==='OPERATORS';
+  const isSys=role==='SYS';
+  d.innerHTML=`<span class="tl-time">${time||nowTime()}</span><span class="tl-role ${isSys?'sys':isOp?'op':'cl'}">${isSys?'':(isOp?'OPERATORS:':'KLIENTS:')}</span><span class="tl-text ${isSys?'sys':''}">${text}</span>`;
+  p.appendChild(d);
+  p.scrollTop=p.scrollHeight;
+}
+
+function resetPipeline(){
+  ['call','voice','client','service','confirm','pdf','email'].forEach(s=>setStep(s,'pending'));
+  setText('call-number','—');
+  setText('timer','00:00:00');
+  setText('rp-sub','Waiting for call...');
+  setText('pc-number','—');setText('pc-duration','Waiting...');
+  setText('pc-transcript','Awaiting speech...');
+  setText('pc-client','—');setText('pc-client-sub','Not started');
+  setText('pc-service','—');setText('pc-rate','');
+  setText('pc-total','—');setText('pc-duration2','—');
+  setText('pc-pdf','Pending');setText('pc-email','Pending');
+  document.getElementById('pt-confirm').style.display='none';
+  document.getElementById('approve-row').style.display='none';
+  document.getElementById('waveform').className='waveform idle';
+  document.getElementById('transcript').innerHTML='';
+}
+
+function approvePipeline(){
+  setStep('confirm','done');
+  document.getElementById('approve-row').style.display='none';
+}
+
+// Load initial state
+fetch('/api/dashboard/state').then(r=>r.json()).then(d=>{
+  if(d.stats){
+    setText('bb-invoices',d.stats.invoices_sent+' Units');
+    setText('bb-completed',d.stats.invoices_sent);
+  }
+  if(d.calls){
+    const active=d.calls.filter(c=>c.status==='active').length;
+    const done=d.calls.filter(c=>c.status==='done').length;
+    setText('bb-active',active);
+    setText('bb-completed',done);
+  }
+});
+
+// SSE
+const es=new EventSource('/api/events');
+es.onmessage=e=>{
+  const m=JSON.parse(e.data);
+  const t=nowTime();
+
+  if(m.type==='call_start'){
+    resetPipeline();
+    activeCalls++;
+    setText('bb-active',activeCalls);
+    setText('call-number','Incoming...');
+    setStep('call','active');
+    setText('pc-number','Connecting...');
+    setText('pt-call',t);
+    addTranscript('SYS','[Sistēma savienota]',t);
+    startTimer();
+    document.getElementById('waveform').className='waveform';
+    setText('rp-sub','Processing call...');
   }
 
-  const icon = document.getElementById('icon-' + id);
-  const labelEl = document.getElementById('label-' + id);
-  const detailEl = document.getElementById('detail-' + id);
-  const timeEl = document.getElementById('time-' + id);
-
-  labelEl.textContent = label;
-  if (detail) detailEl.textContent = detail;
-
-  if (status === 'running') {
-    icon.className = 'step-icon running';
-    icon.innerHTML = '&#8987;';
-  } else if (status === 'done') {
-    icon.className = 'step-icon done';
-    icon.innerHTML = '&#10003;';
-    if (timeMs) timeEl.textContent = (timeMs / 1000).toFixed(1) + 's';
-  } else if (status === 'waiting') {
-    icon.className = 'step-icon waiting';
-    icon.innerHTML = '&#8986;';
-  } else if (status === 'error') {
-    icon.className = 'step-icon error';
-    icon.innerHTML = '&#10007;';
+  else if(m.type==='transcript'){
+    setStep('call','done');
+    setText('call-number','Active Call');
+    setStep('voice','active');
+    setText('pt-voice',t);
+    const lines=m.text.split('\n');
+    let userText='';
+    lines.forEach(l=>{
+      if(l.startsWith('USER:')){const txt=l.slice(5).trim();addTranscript('USER',txt,t);userText=txt;}
+      else if(l.startsWith('AGENT:')){addTranscript('AGENT',l.slice(6).trim(),t);}
+    });
+    if(userText){
+      setText('pc-transcript','"...'+userText.slice(0,60)+(userText.length>60?'...':'')+'"');
+      setStep('voice','done');
+    }
   }
-}
 
-function appendTranscript(role, text) {
-  if (firstMessage) {
-    transcriptArea.innerHTML = '';
-    firstMessage = false;
+  else if(m.type==='notion_update'){
+    if(m.action==='found'||m.action==='created'){
+      setStep('client','done');
+      setText('pc-client',m.name);
+      setText('pc-client-sub',(m.action==='created'?'New client created':'Found in Notion')+(m.detail?' · '+m.detail:''));
+      setText('pt-client',t);
+    } else if(m.action==='not_found'){
+      setStep('client','active');
+      setText('pc-client','Looking up...');
+      setText('pt-client',t);
+    }
   }
-  const div = document.createElement('div');
-  div.style.marginBottom = '0.5rem';
-  const label = role === 'user' ? 'YOU' : 'OPERATOR';
-  div.innerHTML = `<span class="label">${label}</span><span class="${role}">${escapeHtml(text)}</span>`;
-  transcriptArea.appendChild(div);
-  transcriptArea.scrollTop = transcriptArea.scrollHeight;
-}
 
-function escapeHtml(s) {
-  const d = document.createElement('div');
-  d.textContent = s;
-  return d.innerHTML;
-}
-
-function handleEvent(evt) {
-  const d = JSON.parse(evt.data);
-
-  switch (d.type) {
-    case 'transcript':
-      appendTranscript('user', d.text);
-      break;
-
-    case 'step_start':
-      addStep(d.step, d.label, 'running', d.detail);
-      break;
-
-    case 'step_done':
-      addStep(d.step, d.label, 'done', d.detail, d.duration_ms);
-      break;
-
-    case 'step_waiting':
-      addStep(d.step, d.label, 'waiting', d.detail);
-      break;
-
-    case 'response':
-      responseArea.textContent = d.text;
-      appendTranscript('assistant', d.text);
-      break;
-
-    case 'invoice':
-      document.getElementById('inv-number').textContent = d.invoice_number;
-      document.getElementById('inv-client').textContent = d.client;
-      document.getElementById('inv-total').textContent = d.total || '—';
-      if (d.drive_link && !d.drive_link.startsWith('file://')) {
-        document.getElementById('inv-link').href = d.drive_link;
-        document.getElementById('inv-link-row').style.display = 'flex';
-      }
-      invoicePreview.className = 'visible';
-      break;
-
-    case 'error':
-      addStep('error', 'Error', 'error', d.message);
-      break;
-
-    case 'reset':
-      stepsArea.innerHTML = '';
-      stepElements = {};
-      transcriptArea.innerHTML = '<span style="color: #444;">Waiting for input...</span>';
-      responseArea.innerHTML = '<span style="color: #444;">Waiting...</span>';
-      invoicePreview.className = '';
-      firstMessage = true;
-      break;
+  else if(m.type==='step_start'){
+    if(m.step==='lookup_client'||m.step==='create_client'){setStep('client','active');setText('pt-client',t);}
+    else if(m.step==='lookup_service'){setStep('service','active');setText('pt-service',t);}
+    else if(m.step==='pdf'){setStep('pdf','active');setText('pc-pdf','Generating...');setText('pt-pdf',t);}
+    else if(m.step==='email_draft'){setStep('email','active');setText('pc-email','Drafting...');setText('pt-email',t);}
+    else if(m.step==='email_send'){setText('pc-email','Sending...');}
+    else if(m.step==='create_invoice'){
+      setStep('confirm','waiting');
+      document.getElementById('pt-confirm').style.display='inline-block';
+    }
   }
-}
 
-function connect() {
-  const es = new EventSource('/api/events');
+  else if(m.type==='step_done'){
+    if(m.step==='lookup_service'){
+      setStep('service','done');
+      const parts=m.detail?m.detail.split('—'):'';
+      setText('pc-service',parts[0]?parts[0].trim():'Service found');
+      setText('pc-rate',parts[1]?parts[1].trim():'');
+    }
+    else if(m.step==='pdf'){setStep('pdf','done');setText('pc-pdf','Generated · '+m.detail);}
+    else if(m.step==='email_send'||m.step==='email_draft'){
+      if(m.step==='email_send'){setStep('email','done');setText('pc-email','Sent ✓');}
+    }
+  }
 
-  es.onopen = () => setConnected(true);
-  es.onmessage = handleEvent;
-  es.onerror = () => {
-    setConnected(false);
-    es.close();
-    setTimeout(connect, 2000);
-  };
-}
+  else if(m.type==='invoice'){
+    currentInvoiceNumber=m.invoice_number;
+    setStep('confirm','waiting');
+    document.getElementById('pt-confirm').style.display='inline-block';
+    document.getElementById('approve-row').style.display='flex';
+    setText('pc-total',m.total);
+    setText('rp-sub','Real-time processing sequence for '+m.invoice_number);
+    const totalNum=parseFloat(m.total.replace(/[^0-9.]/g,''))||0;
+    totalAmount+=totalNum;
+    setText('bb-amount',totalAmount.toFixed(2)+' EUR');
+    setText('bb-last',m.invoice_number+' (just now)');
+    completedCalls++;
+    setText('bb-invoices',completedCalls+' Units');
+    if(m.stats){setText('bb-completed',m.stats.invoices_sent||completedCalls);}
+    addTranscript('SYS','[Apstrādā balsi...]',t);
+  }
 
-connect();
+  else if(m.type==='email_sent'){
+    if(m.success){setStep('email','done');setText('pc-email','Delivered to '+m.to);}
+    else{setStep('email','error');}
+  }
+
+  else if(m.type==='call_end'){
+    stopTimer();
+    if(activeCalls>0) activeCalls--;
+    setText('bb-active',activeCalls);
+    document.getElementById('waveform').className='waveform idle';
+    if(m.success){
+      setStep('call','done');
+      setText('pc-duration',timerSecs+'s duration');
+    }
+    if(m.stats){
+      setText('bb-completed',m.stats.invoices_sent||completedCalls);
+    }
+  }
+
+  else if(m.type==='reset'){
+    resetPipeline();
+    stopTimer();
+  }
+};
+
+es.onerror=()=>{
+  document.querySelector('.system-badge').textContent='SYSTEM OFFLINE';
+  document.querySelector('.system-badge').style.color='var(--red)';
+};
 </script>
 </body>
 </html>

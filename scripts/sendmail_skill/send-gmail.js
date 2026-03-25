@@ -1,25 +1,22 @@
 /**
- * Gmail sender via existing Chrome remote debugging session (default 9222).
+ * Gmail sender via Chrome remote debugging (port 9222 by default).
+ * Auto-launches Chrome with debug port if it isn't already running.
  *
  * Usage:
- *   node send-gmail.js --to "a@b.com" --subject "Hello" --body "Text" [--file "C:\\path\\doc.pdf"] [--port 9333]
- *
- * Defaults:
- *   --port 9222
- *
- * Behavior:
- *   - Connects to Chrome via http://127.0.0.1:<port>
- *   - Navigates to https://mail.google.com/
- *   - Clicks Compose
- *   - Fills To / Subject / Body
- *   - Optionally attaches file if provided AND port is default 9222
- *     (per your rule: skip attaching if --port is used)
- *   - Clicks Send and waits for "Message sent" toast
+ *   node send-gmail.js --to "a@b.com" --subject "Hello" --body "Text" [--file "/path/doc.pdf"] [--port 9222]
  */
 
 const puppeteer = require('puppeteer-core');
 const fs = require('fs');
 const path = require('path');
+const { spawn } = require('child_process');
+
+// ── Chrome paths by platform ───────────────────────────────────
+const CHROME_PATHS = {
+  darwin: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  linux: '/usr/bin/google-chrome',
+  win32: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+};
 
 function parseArgs(argv) {
   const out = {};
@@ -28,22 +25,64 @@ function parseArgs(argv) {
     if (!a.startsWith('--')) continue;
     const key = a.slice(2);
     const val = argv[i + 1];
-    if (val && !val.startsWith('--')) {
-      out[key] = val;
-      i++;
-    } else {
-      out[key] = true;
-    }
+    if (val && !val.startsWith('--')) { out[key] = val; i++; }
+    else out[key] = true;
   }
   return out;
 }
 
+async function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function isChromeRunning(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+    return res.ok;
+  } catch { return false; }
+}
+
+async function launchChrome(port) {
+  const chromePath = CHROME_PATHS[process.platform] || CHROME_PATHS.linux;
+  if (!fs.existsSync(chromePath)) {
+    throw new Error(`Chrome not found at ${chromePath}. Install Chrome or open it manually.`);
+  }
+
+  console.log(`Chrome not detected — launching with --remote-debugging-port=${port}...`);
+  const child = spawn(chromePath, [
+    `--remote-debugging-port=${port}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-default-apps',
+    '--disable-popup-blocking',
+    'https://mail.google.com/',
+  ], { detached: true, stdio: 'ignore' });
+  child.unref();
+
+  // Wait up to 20s for Chrome to be ready
+  for (let i = 0; i < 20; i++) {
+    await sleep(1000);
+    if (await isChromeRunning(port)) {
+      console.log(`Chrome ready (${i + 1}s)`);
+      return;
+    }
+  }
+  throw new Error('Chrome did not become ready within 20 seconds.');
+}
+
+async function ensureChrome(port) {
+  if (await isChromeRunning(port)) {
+    console.log(`Chrome already running on port ${port}`);
+    return;
+  }
+  await launchChrome(port);
+  // Extra buffer for Gmail to load after fresh launch
+  await sleep(3000);
+}
+
 async function getWsEndpoint(port) {
-  const debugUrl = `http://127.0.0.1:${port}`;
-  const res = await fetch(`${debugUrl}/json/version`);
-  if (!res.ok) throw new Error(`Could not reach Chrome at ${debugUrl}. Start Chrome with --remote-debugging-port=${port}`);
+  const res = await fetch(`http://127.0.0.1:${port}/json/version`);
+  if (!res.ok) throw new Error(`Could not reach Chrome at port ${port}`);
   const data = await res.json();
-  if (!data.webSocketDebuggerUrl) throw new Error('webSocketDebuggerUrl missing from /json/version');
+  if (!data.webSocketDebuggerUrl) throw new Error('webSocketDebuggerUrl missing');
   return data.webSocketDebuggerUrl;
 }
 
@@ -72,29 +111,44 @@ async function main() {
   if (!to) throw new Error('Missing required --to "email@domain.com"');
   if (Number.isNaN(port) || port <= 0) throw new Error('Invalid --port');
 
-  const usingCustomPort = !!args.port && port !== 9222;
-  const shouldAttach = !!filePath && !usingCustomPort; // your rule
+  const shouldAttach = !!filePath;
 
   if (shouldAttach) {
     if (!fs.existsSync(filePath)) throw new Error(`Attachment not found: ${filePath}`);
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) throw new Error(`Attachment is not a file: ${filePath}`);
+    if (!fs.statSync(filePath).isFile()) throw new Error(`Attachment is not a file: ${filePath}`);
   }
+
+  // ── Auto-launch Chrome if needed ──────────────────────────────
+  await ensureChrome(port);
 
   const ws = await getWsEndpoint(port);
   const browser = await puppeteer.connect({ browserWSEndpoint: ws, defaultViewport: null });
 
+  // Find or open Gmail tab
   const pages = await browser.pages();
-  const page = pages.length ? pages[0] : await browser.newPage();
-
-  await page.bringToFront();
-  await page.goto('https://mail.google.com/', { waitUntil: 'domcontentloaded' });
-
-  if (!page.url().includes('mail.google.com')) {
-    throw new Error(`Not on Gmail (are you logged in?). Current URL: ${page.url()}`);
+  let page = pages.find(p => p.url().includes('mail.google.com'));
+  if (!page) {
+    page = pages.length ? pages[0] : await browser.newPage();
+    await page.goto('https://mail.google.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
   }
 
-  await clickByText(page, 'Compose');
+  await page.bringToFront();
+
+  // Reload if not on Gmail (e.g. new tab page after fresh launch)
+  if (!page.url().includes('mail.google.com')) {
+    await page.goto('https://mail.google.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  }
+
+  if (!page.url().includes('mail.google.com')) {
+    throw new Error(`Not on Gmail — are you logged in? URL: ${page.url()}`);
+  }
+
+  // Wait for Gmail UI to be ready
+  await page.waitForFunction(() => {
+    return !!document.querySelector('div[gh="cm"], div[role="main"]');
+  }, { timeout: 30000 });
+
+  await clickByText(page, 'compose');
 
   await page.waitForFunction(() => {
     return !!document.querySelector('textarea[name="to"], input[aria-label="To recipients"], textarea[aria-label="To recipients"]');
@@ -119,7 +173,6 @@ async function main() {
 
   if (shouldAttach) {
     const selector = 'input[type="file"][name="Filedata"], input[type="file"]';
-
     const existing = await page.$(selector);
     if (!existing) {
       await page.waitForFunction(() => {
@@ -133,8 +186,8 @@ async function main() {
 
       await page.evaluate(() => {
         const els = Array.from(document.querySelectorAll('div[role="button"],button'));
-        const btn = els.find(e => ((e.getAttribute('data-tooltip') || '').toLowerCase().includes('attach files')))
-          || els.find(e => ((e.getAttribute('aria-label') || '').toLowerCase().includes('attach files')));
+        const btn = els.find(e => (e.getAttribute('data-tooltip') || '').toLowerCase().includes('attach files'))
+          || els.find(e => (e.getAttribute('aria-label') || '').toLowerCase().includes('attach files'));
         btn?.click();
       });
     }
@@ -144,17 +197,18 @@ async function main() {
 
     const base = path.basename(filePath);
     await page.waitForFunction((name) => {
-      return document.body && document.body.innerText && document.body.innerText.includes(name);
+      return document.body?.innerText?.includes(name);
     }, { timeout: 60000 }, base);
 
     console.log(`Attached: ${filePath}`);
-  } else if (filePath && usingCustomPort) {
-    console.log('Note: --port was provided; per configuration, skipping attachment.');
   }
 
   await page.waitForFunction(() => {
     const btns = Array.from(document.querySelectorAll('div[role="button"],button'));
-    return btns.some(b => (b.getAttribute('data-tooltip') || '').toLowerCase().startsWith('send') || (b.textContent || '').trim().toLowerCase() === 'send');
+    return btns.some(b =>
+      (b.getAttribute('data-tooltip') || '').toLowerCase().startsWith('send') ||
+      (b.textContent || '').trim().toLowerCase() === 'send'
+    );
   }, { timeout: 60000 });
 
   await page.evaluate(() => {
@@ -174,6 +228,6 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error('FAILED:', e && e.message ? e.message : e);
+  console.error('FAILED:', e?.message || e);
   process.exitCode = 1;
 });

@@ -13,6 +13,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from dashboard.events import emit_step_start, emit_step_done, emit_invoice, emit_email_sent
 from server.config import (
     COMPANY_NAME, COMPANY_REG_NR, COMPANY_VAT_NR,
     COMPANY_ADDRESS, COMPANY_BANK, COMPANY_IBAN, COMPANY_PHONE,
@@ -167,6 +168,7 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
     date_str = format_date(lang)
 
     # ── Step 1: Generate PDF ──────────────────────────────────
+    emit_step_start("pdf", "Generate PDF", f"{invoice_number}")
     log.info(f"[{invoice_number}] Generating PDF...")
     try:
         data = InvoiceData(
@@ -199,6 +201,7 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         )
         pdf_bytes = generate_invoice_pdf(data)
         log.info(f"[{invoice_number}] PDF generated ({len(pdf_bytes):,} bytes)")
+        emit_step_done("pdf", "Generate PDF", f"{len(pdf_bytes):,} bytes")
     except Exception as exc:
         log.error(f"PDF generation failed: {exc}", exc_info=True)
         return PipelineResult(success=False, message=_err(lang), error=f"PDF error: {exc}")
@@ -215,6 +218,7 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         pdf_path = None
 
     # ── Step 3: Draft email ───────────────────────────────────
+    emit_step_start("email_draft", "Draft Email", client_email)
     log.info(f"[{invoice_number}] Drafting email...")
     try:
         email_params = {**params, "client_email": client_email, "amount": total, "invoice_number": invoice_number}
@@ -223,7 +227,10 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         log.error(f"Email draft failed: {exc}", exc_info=True)
         return PipelineResult(success=False, message=_err(lang), error=f"Email error: {exc}")
 
+    emit_step_done("email_draft", "Draft Email", email.subject)
+
     # ── Step 4: Send via sendmail_skill ───────────────────────
+    emit_step_start("email_send", "Send Email", client_email)
     log.info(f"[{invoice_number}] Sending email to {client_email} via sendmail_skill...")
     sent = await _send_via_sendmail_skill(
         to=client_email,
@@ -231,6 +238,10 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
         body=email.body,
         pdf_path=pdf_path,
     )
+
+    emit_step_done("email_send", "Send Email", "sent" if sent else "failed")
+    emit_email_sent(client_email, email.subject, sent)
+    emit_invoice(invoice_number, format_amount(total, "EUR", lang), data.client_name)
 
     # ── Step 5: Build result ──────────────────────────────────
     tmpl = SUCCESS_MESSAGES["send_invoice"].get(lang, SUCCESS_MESSAGES["send_invoice"]["en"])
