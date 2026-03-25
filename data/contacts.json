@@ -1,0 +1,26 @@
+[
+  {
+    "full_name": "John Smith",
+    "email": "john.smith@gmail.com",
+    "phone": "+371 29000001",
+    "company": "Smith Consulting"
+  },
+  {
+    "full_name": "Janis Berzins",
+    "email": "janis.berzins@inbox.lv",
+    "phone": "+371 29000002",
+    "company": ""
+  },
+  {
+    "full_name": "Anna Petrova",
+    "email": "anna.petrova@gmail.com",
+    "phone": "+371 29000003",
+    "company": "Petrova Design"
+  },
+  {
+    "full_name": "Maria Ozola",
+    "email": "maria.ozola@gmail.com",
+    "phone": "+371 29000004",
+    "company": ""
+  }
+]
