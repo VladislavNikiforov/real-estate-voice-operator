@@ -1,0 +1,18 @@
+subject: Maksājuma atgādinājums{property_part}
+---
+Labdien, {client_name}!
+
+Atgādinām par neapmaksāto rēķinu{property_part}.
+
+{amount_line}Lūdzam veikt maksājumu pēc iespējas drīzāk.
+
+Bankas rekvizīti:
+{company_name}
+{company_bank}
+IBAN: {company_iban}
+
+Ja maksājums jau ir veikts, lūdzu ignorējiet šo ziņojumu.
+
+Ar cieņu,
+{company_name}
+{company_phone}

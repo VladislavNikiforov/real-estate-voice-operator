@@ -1,0 +1,15 @@
+subject: Document Request — {client_name}
+---
+Dear {client_name},
+
+To proceed with the transaction, please provide the following documents:
+
+{documents_needed}
+
+Please send the documents to this email address or bring them to our office.
+
+If you have any questions, please get in touch.
+
+Best regards,
+{company_name}
+{company_phone}

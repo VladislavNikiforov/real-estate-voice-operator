@@ -1,0 +1,13 @@
+subject: Following up after your viewing{property_part}
+---
+Dear {client_name},
+
+Thank you for visiting our property{property_part}.
+
+We hope the viewing went well. We'd be happy to answer any questions and provide further information.
+
+{notes_line}If you're ready to move forward or schedule a next step, please don't hesitate to get in touch.
+
+Best regards,
+{company_name}
+{company_phone}

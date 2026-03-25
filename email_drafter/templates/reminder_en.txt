@@ -1,0 +1,18 @@
+subject: Payment Reminder{property_part}
+---
+Dear {client_name},
+
+This is a friendly reminder about the outstanding payment{property_part}.
+
+{amount_line}Please arrange payment at your earliest convenience.
+
+Bank details:
+{company_name}
+{company_bank}
+IBAN: {company_iban}
+
+If you have already made the payment, please disregard this message.
+
+Best regards,
+{company_name}
+{company_phone}

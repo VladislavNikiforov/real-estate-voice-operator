@@ -1,0 +1,15 @@
+subject: Dokumentu pieprasījums — {client_name}
+---
+Labdien, {client_name}!
+
+Lai turpinātu darījumu, lūdzam iesniegt šādus dokumentus:
+
+{documents_needed}
+
+Dokumentus lūdzu nosūtīt uz šo e-pastu vai atnest uz biroju.
+
+Ja jums ir jautājumi, sazinieties ar mums.
+
+Ar cieņu,
+{company_name}
+{company_phone}

@@ -1,0 +1,21 @@
+subject: Invoice {invoice_number} — Property {property_id}
+---
+Dear {client_name},
+
+Please find your invoice {invoice_number} for property {property_id}.
+
+Amount due: {formatted_amount}
+Payment terms: 14 days from invoice date
+
+Invoice document: {drive_link}
+
+Bank details:
+{company_name}
+{company_bank}
+IBAN: {company_iban}
+
+If you have any questions, please don't hesitate to contact us.
+
+Best regards,
+{company_name}
+{company_phone}

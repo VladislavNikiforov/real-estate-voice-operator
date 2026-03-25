@@ -1,0 +1,13 @@
+subject: Atsauksme pēc apskates{property_part}
+---
+Labdien, {client_name}!
+
+Paldies, ka apmeklējāt mūsu īpašumu{property_part}.
+
+Ceram, ka apskate Jums patika. Labprāt atbildēsim uz visiem jautājumiem un sniegsim papildu informāciju.
+
+{notes_line}Ja esat gatavs turpināt sarunu vai plānot nākamo soli, lūdzu sazinieties ar mums.
+
+Ar cieņu,
+{company_name}
+{company_phone}

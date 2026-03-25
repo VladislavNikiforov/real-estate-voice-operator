@@ -1,0 +1,21 @@
+subject: Rēķins {invoice_number} — Īpašums {property_id}
+---
+Labdien, {client_name}!
+
+Nosūtām Jums rēķinu Nr. {invoice_number} par īpašumu {property_id}.
+
+Summa: {formatted_amount}
+Apmaksas termiņš: 14 dienas no rēķina datuma
+
+Rēķins pieejams šeit: {drive_link}
+
+Bankas rekvizīti:
+{company_name}
+{company_bank}
+IBAN: {company_iban}
+
+Ja jums ir jautājumi, lūdzu sazinieties ar mums.
+
+Ar cieņu,
+{company_name}
+{company_phone}

@@ -1,0 +1,21 @@
+subject: Счёт {invoice_number} — Объект {property_id}
+---
+Здравствуйте, {client_name}!
+
+Направляем Вам счёт № {invoice_number} за объект недвижимости {property_id}.
+
+Сумма: {formatted_amount}
+Срок оплаты: 14 дней с даты выставления счёта
+
+Счёт доступен по ссылке: {drive_link}
+
+Банковские реквизиты:
+{company_name}
+{company_bank}
+IBAN: {company_iban}
+
+При возникновении вопросов, пожалуйста, свяжитесь с нами.
+
+С уважением,
+{company_name}
+{company_phone}
