@@ -1,12 +1,14 @@
-"""server/app.py — FastAPI webhook server."""
+"""server/app.py — FastAPI server: ElevenLabs post-call + Claude brain + dashboard."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, StreamingResponse, Response
 
-from server.vapi_handler import handle_tool_call
+from server.elevenlabs_handler import handle_post_call
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -18,10 +20,11 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("🚀 Real Estate Voice Operator server starting...")
-    from server.config import OPENCLAW_URL, GDRIVE_CONFIGURED
-    log.info(f"   OpenClaw URL : {OPENCLAW_URL}")
-    log.info(f"   Google Drive : {'configured ✓' if GDRIVE_CONFIGURED else 'local fallback'}")
+    log.info("Real Estate Voice Operator starting...")
+    from server.config import ANTHROPIC_API_KEY, NOTION_TOKEN, CHROME_DEBUG_PORT
+    log.info(f"   Claude brain  : {'configured' if ANTHROPIC_API_KEY else 'MISSING API KEY'}")
+    log.info(f"   Notion        : {'configured' if NOTION_TOKEN else 'disabled (no token)'}")
+    log.info(f"   sendmail_skill: Chrome debug port {CHROME_DEBUG_PORT}")
     yield
     log.info("Server shutting down.")
 
@@ -29,63 +32,140 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="RE Voice Operator", lifespan=lifespan)
 
 
-# ── POST /api/vapi/tool-call  ─────────────────────────────────
+# ── POST /api/elevenlabs/post-call  ───────────────────────────
+# Main entry point — ElevenLabs fires this after every call ends
 
-@app.post("/api/vapi/tool-call")
-async def vapi_tool_call(request: Request):
-    """Vapi calls this when the assistant invokes a tool."""
+@app.post("/api/elevenlabs/post-call")
+async def elevenlabs_post_call(request: Request):
+    """Receive ElevenLabs post-call transcript → Claude brain → pipeline."""
     try:
         payload = await request.json()
-        log.debug(f"Vapi payload: {payload}")
     except Exception:
-        return JSONResponse({"results": [{"toolCallId": "err", "result": "Bad request — invalid JSON"}]}, status_code=400)
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    response = await handle_tool_call(payload)
-    log.debug(f"Vapi response: {response}")
-    return JSONResponse(response)
+    result = await handle_post_call(payload)
+    log.info(f"Post-call result: {result}")
+    return JSONResponse(result)
 
 
-# ── POST /api/test  ───────────────────────────────────────────
+# ── POST /api/chat  ───────────────────────────────────────────
+# Direct Claude brain — send text, get response with tool results
 
-@app.post("/api/test")
-async def test_endpoint(request: Request):
-    """Manual testing without Vapi. Send a tool call directly.
+@app.post("/api/chat")
+async def chat_endpoint(request: Request):
+    """Claude brain conversation endpoint.
 
-    Example body:
-        {
-          "tool": "send_invoice",
-          "params": {
-            "client_name": "Jānis Bērziņš",
-            "client_email": "janis@example.com",
-            "property_id": "apt-3",
-            "amount": 85000,
-            "language": "lv"
-          }
-        }
+    Body: {"session_id": "test", "text": "Send invoice to John for office rental"}
     """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse({"error": "invalid JSON"}, status_code=400)
 
-    tool   = body.get("tool", "")
-    params = body.get("params", {})
+    session_id = body.get("session_id", "default")
+    text = body.get("text", "").strip()
+    if not text:
+        return JSONResponse({"error": "no text provided"}, status_code=400)
 
-    # Wrap as a Vapi payload so we reuse the same handler
-    vapi_payload = {
-        "message": {
-            "type": "tool-calls",
-            "toolCallList": [{
-                "id": "test_call",
-                "type": "function",
-                "function": {"name": tool, "arguments": params},
-            }]
-        }
-    }
+    try:
+        from brain.claude_brain import chat as claude_chat
+        result = await claude_chat(session_id, text)
+        return JSONResponse(result)
+    except Exception as exc:
+        log.error(f"chat error: {exc}", exc_info=True)
+        return JSONResponse({"error": str(exc)}, status_code=500)
 
-    result = await handle_tool_call(vapi_payload)
-    spoken = result["results"][0]["result"] if result.get("results") else ""
-    return JSONResponse({"tool": tool, "result": spoken})
+
+# ── POST /api/chat/reset  ─────────────────────────────────────
+
+@app.post("/api/chat/reset")
+async def chat_reset(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    session_id = body.get("session_id", "default")
+    from brain.claude_brain import clear_session
+    clear_session(session_id)
+    return JSONResponse({"status": "ok", "session_id": session_id})
+
+
+# ── POST /api/test/transcript  ────────────────────────────────
+# Simulate a post-call webhook without making a real call
+
+@app.post("/api/test/transcript")
+async def test_transcript(request: Request):
+    """Test the full transcript → Claude brain → pipeline flow.
+
+    Example:
+      {"transcript":[{"role":"user","message":"Send invoice to John, john@example.com, 1200 euros"}]}
+    """
+    try:
+        payload = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON"}, status_code=400)
+
+    result = await handle_post_call(payload)
+    return JSONResponse(result)
+
+
+# ── POST /api/elevenlabs/twilio-voice  ───────────────────────
+# Twilio calls this when someone dials your number
+# Returns TwiML that bridges the call to ElevenLabs agent
+
+@app.post("/api/elevenlabs/twilio-voice")
+async def twilio_voice(request: Request):
+    """Twilio webhook — connects incoming call to ElevenLabs agent via stream."""
+    from twilio.twiml.voice_response import VoiceResponse, Connect
+    from server.config import ELEVENLABS_AGENT_ID
+
+    response = VoiceResponse()
+    response.say("Connecting you to the real estate assistant.")
+
+    connect = Connect()
+    stream_url = f"wss://api.elevenlabs.io/v1/convai/twilio?agent_id={ELEVENLABS_AGENT_ID}"
+    connect.stream(url=stream_url)
+    response.append(connect)
+
+    return Response(content=str(response), media_type="application/xml")
+
+
+# ── GET /dashboard  ───────────────────────────────────────────
+
+@app.get("/dashboard")
+async def dashboard():
+    html_path = Path(__file__).parent.parent / "dashboard" / "index.html"
+    if html_path.exists():
+        return HTMLResponse(html_path.read_text(encoding="utf-8"))
+    return JSONResponse({"error": "dashboard not found"}, status_code=404)
+
+
+# ── GET /api/events  ──────────────────────────────────────────
+
+@app.get("/api/events")
+async def sse_events():
+    """Server-Sent Events stream for the live dashboard."""
+    from dashboard.events import subscribe, unsubscribe
+    q = subscribe()
+
+    async def event_stream():
+        try:
+            while True:
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=30)
+                    yield f"data: {data}\n\n"
+                except asyncio.TimeoutError:
+                    yield f": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            unsubscribe(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 # ── GET /health  ──────────────────────────────────────────────

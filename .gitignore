@@ -14,3 +14,4 @@ build/
 .DS_Store
 .idea/
 .vscode/
+scripts/sendmail_skill/node_modules/

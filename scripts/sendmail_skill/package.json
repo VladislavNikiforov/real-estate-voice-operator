@@ -1,0 +1,13 @@
+{
+  "name": "gmail-9222-sender",
+  "version": "1.0.0",
+  "description": "Send Gmail messages via an existing Chrome session on remote debugging port 9222.",
+  "main": "send-gmail.js",
+  "type": "commonjs",
+  "scripts": {
+    "send": "node send-gmail.js"
+  },
+  "dependencies": {
+    "puppeteer-core": "^24.10.2"
+  }
+}
