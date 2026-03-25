@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from server.elevenlabs_handler import lookup_contact, search_emails, create_task
+from brain.claude_brain import chat as claude_chat, clear_session
 
 logging.basicConfig(
     level=logging.DEBUG,
@@ -71,6 +72,44 @@ async def tool_create_task(request: Request):
     result = await create_task(params)
     log.info(f"[create-task] result={result}")
     return JSONResponse(result)
+
+
+# ── Claude brain endpoint ─────────────────────────────────────
+
+@app.post("/api/chat")
+async def chat_endpoint(request: Request):
+    """Claude-powered conversation. Send text, get response with tool results.
+
+    Body: {"session_id": "...", "text": "Invoice Desktop Commander for 8 hours venue rental"}
+    Response: {"text": "...", "actions_taken": [...]}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+
+    session_id = body.get("session_id", "default")
+    text = body.get("text", "").strip()
+
+    if not text:
+        return JSONResponse({"error": "No text provided"}, status_code=400)
+
+    log.info(f"[chat] session={session_id} text='{text[:80]}'")
+    result = await claude_chat(session_id, text)
+    log.info(f"[chat] response='{result['text'][:80]}' actions={len(result['actions_taken'])}")
+    return JSONResponse(result)
+
+
+@app.post("/api/chat/reset")
+async def chat_reset(request: Request):
+    """Reset a chat session."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    session_id = body.get("session_id", "default")
+    clear_session(session_id)
+    return JSONResponse({"status": "ok", "session_id": session_id})
 
 
 # ── Manual test endpoint ──────────────────────────────────────

@@ -1,4 +1,4 @@
-"""Tests for ElevenLabs webhook endpoints."""
+"""Tests for ElevenLabs webhook endpoints + Claude chat endpoint."""
 import pytest
 from unittest.mock import AsyncMock, patch
 from fastapi.testclient import TestClient
@@ -77,3 +77,20 @@ class TestTestEndpoint:
             })
         assert resp.status_code == 200
         assert "result" in resp.json()
+
+
+class TestChatEndpoint:
+    def test_chat_no_text_returns_400(self):
+        resp = client.post("/api/chat", json={"session_id": "test", "text": ""})
+        assert resp.status_code == 400
+
+    def test_chat_no_api_key_returns_message(self):
+        """Without ANTHROPIC_API_KEY, chat returns a friendly error."""
+        resp = client.post("/api/chat", json={"session_id": "test", "text": "hello"})
+        assert resp.status_code == 200
+        assert "not configured" in resp.json()["text"].lower() or "text" in resp.json()
+
+    def test_chat_reset(self):
+        resp = client.post("/api/chat/reset", json={"session_id": "test"})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"

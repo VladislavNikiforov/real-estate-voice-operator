@@ -5,12 +5,15 @@ the LLM extracted from conversation. Each tool has its own endpoint URL.
 Response is a JSON object that the agent reads back to the user.
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 from typing import Any
 
 from llm import orchestrator
+from notion.client import lookup_client as notion_lookup_client
 from gmail.sender import search_emails_gmail
 
 log = logging.getLogger(__name__)
@@ -38,19 +41,51 @@ def _load_contacts() -> list[dict]:
     return _CONTACTS
 
 
+async def _try_notion_lookup(name: str) -> dict | None:
+    """Try Notion first, return None if not available."""
+    try:
+        result = await notion_lookup_client(name)
+        if result:
+            return {
+                "full_name": result.get("Nosaukums", ""),
+                "email": result.get("E-pasts", ""),
+            }
+    except Exception as exc:
+        log.warning(f"Notion lookup failed, falling back to JSON: {exc}")
+    return None
+
+
 def lookup_contact(params: dict) -> dict:
-    """Find a contact by name (fuzzy match)."""
+    """Find a contact by name. Tries Notion first, falls back to local JSON."""
     name = params.get("name", "").strip().lower()
     if not name:
         return {"error": "No name provided"}
 
+    # Try Notion (async call from sync context)
+    import asyncio
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # We're inside an async context — create a task
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                result = pool.submit(
+                    asyncio.run, _try_notion_lookup(params.get("name", ""))
+                ).result(timeout=10)
+        else:
+            result = asyncio.run(_try_notion_lookup(params.get("name", "")))
+        if result:
+            return result
+    except Exception as exc:
+        log.warning(f"Notion async lookup failed: {exc}")
+
+    # Fallback to local JSON
     contacts = _load_contacts()
     for c in contacts:
         full = c.get("full_name", "").lower()
         if name in full or full in name:
             return {"full_name": c["full_name"], "email": c["email"]}
 
-    # Partial match on first or last name
     for c in contacts:
         parts = c.get("full_name", "").lower().split()
         if any(name in p or p in name for p in parts):

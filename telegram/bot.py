@@ -4,6 +4,8 @@ Sends notifications to the operator after pipeline tasks complete.
 Usage: call send_notification() from the orchestrator after a task finishes.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 
