@@ -5,12 +5,14 @@ import datetime
 import logging
 
 from server.config import (
-    COMPANY_NAME, COMPANY_ADDRESS, COMPANY_BANK, COMPANY_IBAN, COMPANY_PHONE,
+    COMPANY_NAME, COMPANY_REG_NR, COMPANY_VAT_NR,
+    COMPANY_ADDRESS, COMPANY_BANK, COMPANY_IBAN, COMPANY_PHONE,
 )
 from llm.models import (
-    InvoiceData, PipelineResult,
+    InvoiceData, LineItem, PipelineResult,
     SendInvoiceParams, SendReminderParams, FollowUpParams, RequestDocumentsParams,
 )
+from notion.client import lookup_client, lookup_service
 from llm.prompts import SUCCESS_MESSAGES, ERROR_MESSAGE
 from pdf_generator.invoice import generate_invoice_pdf
 from pdf_generator.templates import format_amount, format_date
@@ -35,12 +37,63 @@ def _next_invoice_number() -> str:
 # ── Public handlers ───────────────────────────────────────────
 
 async def handle_send_invoice(params: dict) -> PipelineResult:
-    """Full pipeline: PDF → Drive → Email draft → Gmail API send → Telegram notify."""
-    lang = params.get("language", "en")
+    """Full pipeline: Notion lookup → PDF → Drive → Gmail API send → Telegram notify."""
+    lang = params.get("language", "lv")
     try:
         p = SendInvoiceParams(**params)
     except Exception as exc:
         return PipelineResult(success=False, message=_err(lang), error=str(exc))
+
+    # ── Step 0: Look up client and service from Notion ────────
+    client_data = None
+    service_data = None
+
+    try:
+        client_data = await lookup_client(p.client_name)
+    except Exception as exc:
+        log.warning(f"Notion client lookup failed: {exc}")
+
+    if p.service_name:
+        try:
+            service_data = await lookup_service(p.service_name)
+        except Exception as exc:
+            log.warning(f"Notion service lookup failed: {exc}")
+
+    # Resolve client email: param > Notion > empty
+    client_email = p.client_email or (client_data or {}).get("E-pasts", "")
+    if not client_email:
+        return PipelineResult(
+            success=False, message=_err(lang),
+            error=f"No email found for client '{p.client_name}'",
+        )
+
+    # Calculate amount from service rate x quantity, or use explicit amount
+    vat_rate = 0.0
+    unit = ""
+    unit_price = p.amount
+    line_items = []
+
+    if service_data:
+        unit_price = service_data.get("Likme (EUR)", 0) or p.amount
+        vat_rate = service_data.get("PVN likme (%)", 0) or 0.0
+        unit = service_data.get("Mērvienība", "")
+        service_desc = service_data.get("Pakalpojums", p.service_name)
+    else:
+        service_desc = p.service_name or p.property_id or "Service"
+        if p.amount:
+            unit_price = p.amount
+
+    subtotal = p.quantity * unit_price
+    vat_amount = round(subtotal * vat_rate, 2)
+    total = round(subtotal + vat_amount, 2)
+
+    line_items.append(LineItem(
+        description=service_desc,
+        quantity=p.quantity,
+        unit=unit,
+        unit_price=unit_price,
+        amount=subtotal,
+    ))
 
     invoice_number = _next_invoice_number()
     date_str = format_date(lang)
@@ -50,13 +103,26 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
     try:
         data = InvoiceData(
             invoice_number=invoice_number,
-            client_name=p.client_name,
-            client_email=p.client_email,
+            client_name=client_data.get("Nosaukums", p.client_name) if client_data else p.client_name,
+            client_email=client_email,
+            client_reg_nr=client_data.get("Reģ. nr.", "") if client_data else "",
+            client_vat_nr=client_data.get("PVN nr.", "") if client_data else "",
+            client_address=client_data.get("Adrese", "") if client_data else "",
+            client_bank=client_data.get("Banka", "") if client_data else "",
+            client_iban=client_data.get("IBAN", "") if client_data else "",
+            payment_terms=client_data.get("Apmaksas termiņš", "") if client_data else "",
+            line_items=line_items,
+            subtotal=subtotal,
+            vat_rate=vat_rate,
+            vat_amount=vat_amount,
+            total=total,
+            amount=total,
             property_id=p.property_id,
-            amount=p.amount,
             language=lang,
             date=date_str,
             company_name=COMPANY_NAME,
+            company_reg_nr=COMPANY_REG_NR,
+            company_vat_nr=COMPANY_VAT_NR,
             company_address=COMPANY_ADDRESS,
             company_bank=COMPANY_BANK,
             company_iban=COMPANY_IBAN,
@@ -82,7 +148,12 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
     # ── Step 3: Draft email ───────────────────────────────────
     log.info(f"[{invoice_number}] Drafting email...")
     try:
-        email_params = {**params, "invoice_number": invoice_number}
+        email_params = {
+            **params,
+            "client_email": client_email,
+            "amount": total,
+            "invoice_number": invoice_number,
+        }
         email = draft_email("invoice", email_params, drive_link)
     except Exception as exc:
         log.error(f"Email draft failed: {exc}", exc_info=True)
@@ -102,8 +173,8 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
     tmpl = SUCCESS_MESSAGES["send_invoice"].get(lang, SUCCESS_MESSAGES["send_invoice"]["en"])
     message = tmpl.format(
         invoice_number=invoice_number,
-        amount=format_amount(p.amount, "EUR", lang),
-        client_name=p.client_name,
+        amount=format_amount(total, "EUR", lang),
+        client_name=data.client_name,
     )
     if not gmail_result.get("success"):
         suffix = {"lv": " E-pasts ir rindā.", "ru": " Письмо в очереди.", "en": " Email sending failed — check Gmail auth."}
@@ -114,10 +185,10 @@ async def handle_send_invoice(params: dict) -> PipelineResult:
     await notify_task_complete(
         action="send_invoice",
         client_name=p.client_name,
-        client_email=p.client_email,
+        client_email=client_email,
         invoice_number=invoice_number,
         drive_link=drive_link,
-        amount=p.amount,
+        amount=total,
         success=gmail_result.get("success", False),
     )
 
